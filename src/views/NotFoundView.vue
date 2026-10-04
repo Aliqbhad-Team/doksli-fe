@@ -1,5 +1,5 @@
 <script lang="ts" setup>
-import ButtonComponent from '../components/ButtonComponent.vue';
+import Button from 'primevue/button';
 </script>
 
 <template>
@@ -7,7 +7,7 @@ import ButtonComponent from '../components/ButtonComponent.vue';
     <h1>Page Not Found</h1>
     <br>
     Button :
-    <ButtonComponent/>
+    <Button label="Submit" />
   </section>
 </template>
 
