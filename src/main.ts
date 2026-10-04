@@ -10,6 +10,12 @@ createApp(App)
   .use(PrimeVue, {
     theme: {
       preset: Aura,
+      options: {
+        cssLayer: {
+          name: 'primevue',
+          order: 'theme, base, primevue, components, utilities',
+        },
+      },
     },
   })
   .mount('#app')

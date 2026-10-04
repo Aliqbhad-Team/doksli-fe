@@ -8,6 +8,10 @@ import Button from 'primevue/button';
     <br>
     Button :
     <Button label="Submit" />
+
+    <div class="flex justify-center">
+      Implement Tailwind justify-center
+    </div>
   </section>
 </template>
 
