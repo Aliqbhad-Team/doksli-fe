@@ -23,13 +23,18 @@ export function useTheme() {
     apply(t)
   }
   function apply(t: Theme) {
-    document.documentElement.setAttribute('data-theme', t)
-    if (t === 'dark') {
-      document.documentElement.classList.add('p-dark')
-    } else {
-      document.documentElement.classList.remove('p-dark')
-    }
+    const html = document.documentElement
+    // matikan transition sesaat biar gak kedip — Aura punya transition 0.2s di input/select/checkbox
+    html.classList.add('theme-switching')
+    html.setAttribute('data-theme', t)
+    if (t === 'dark') html.classList.add('p-dark')
+    else html.classList.remove('p-dark')
     localStorage.setItem(THEME_KEY, t)
+    // force reflow lalu lepas class di frame berikutnya -> transisi balik normal tanpa kedip
+    void html.offsetHeight
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => html.classList.remove('theme-switching'))
+    })
   }
   return { theme, init, toggle, set }
 }

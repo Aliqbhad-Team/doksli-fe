@@ -321,7 +321,55 @@ textarea{ resize:vertical; min-height:56px; font-family:inherit; }
     border-color: var(--border) !important;
 }
 
-/* Link .p-dark to our dark variables */
+/* Link .p-dark to our dark variables — mirror data-theme biar instant, gak kedip */
+:root.p-dark,
+html.p-dark {
+  --bg:#12151a; --surface:#1a1e25; --surface-2:#20252d; --border:#2c323c;
+  --text:#e7e9ee; --text-muted:#98a0ac;
+  --accent:#7c9bff; --accent-soft:#202a45; --accent-contrast:#0d1220;
+  --success:#4ade95; --success-soft:#163829;
+  --warning:#e8b155; --warning-soft:#3a2c11;
+  --danger:#f2867d; --danger-soft:#3a1e1c;
+  --locked:#8b93a0; --locked-soft:#242933;
+  --shadow: 0 10px 28px -12px rgba(0,0,0,.55), 0 2px 6px -2px rgba(0,0,0,.4);
+}
 .p-dark {
     color-scheme: dark;
+}
+
+/* === FIX FLICKER dropdown/input/checkbox saat toggle tema === */
+/* Aura kasih transition 0.2s di .p-select/.p-inputtext/.p-checkbox-box, sedangkan var(--surface) ganti instant -> keliatan kedip/lag */
+.p-inputtext,
+.p-select,
+.p-select-label,
+.p-select-dropdown,
+.p-checkbox-box,
+.p-checkbox {
+  transition: none !important;
+}
+html.theme-switching,
+html.theme-switching * {
+  transition: none !important;
+  animation: none !important;
+}
+
+/* === CHECKBOX biru (override Aura emerald #10b981 -> var(--accent) #2954d6/#7c9bff) === */
+.p-checkbox-checked .p-checkbox-box {
+  background: var(--accent) !important;
+  border-color: var(--accent) !important;
+}
+.p-checkbox-checked .p-checkbox-box .p-checkbox-icon,
+.p-checkbox-checked .p-checkbox-icon {
+  color: var(--accent-contrast) !important;
+}
+.p-checkbox-checked:not(.p-disabled):has(.p-checkbox-input:hover) .p-checkbox-box {
+  background: var(--accent) !important;
+  border-color: var(--accent) !important;
+  filter: brightness(1.06);
+}
+.p-checkbox-checked:not(.p-disabled):has(.p-checkbox-input:hover) .p-checkbox-icon {
+  color: var(--accent-contrast) !important;
+}
+.p-checkbox-checked:not(.p-disabled):has(.p-checkbox-input:focus-visible) .p-checkbox-box {
+  border-color: var(--accent) !important;
 }
