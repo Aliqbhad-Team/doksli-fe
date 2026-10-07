@@ -1,6 +1,7 @@
 import { createApp } from 'vue'
 import PrimeVue from 'primevue/config'
 import Aura from '@primeuix/themes/aura'
+import 'primeicons/primeicons.css'
 import './style.css'
 import App from './App.vue'
 import router from './router'
@@ -11,11 +12,13 @@ createApp(App)
     theme: {
       preset: Aura,
       options: {
+        darkModeSelector: '.p-dark',
         cssLayer: {
           name: 'primevue',
           order: 'theme, base, primevue, components, utilities',
         },
       },
     },
+    ripple: true,
   })
   .mount('#app')
