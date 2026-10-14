@@ -1,11 +1,15 @@
 <script setup lang="ts">
 import { onMounted, ref, watch } from 'vue'
-import { RouterLink, RouterView, useRoute } from 'vue-router'
+import { RouterLink, RouterView, useRoute, useRouter } from 'vue-router'
 import { useTheme } from '../composables/useTheme'
+import { useAuthStore } from '../stores/auth'
+import Icon from '../components/Icon.vue'
 import ToggleSwitch from 'primevue/toggleswitch'
 
 const route = useRoute()
+const router = useRouter()
 const { theme, init, set } = useTheme()
+const authStore = useAuthStore()
 
 const isDark = ref(false)
 
@@ -24,6 +28,11 @@ onMounted(() => {
 watch(isDark, (val) => {
   set(val ? 'dark' : 'light')
 })
+
+const handleLogout = () => {
+  authStore.logout()
+  router.push('/login')
+}
 </script>
 
 <template>
@@ -67,6 +76,10 @@ watch(isDark, (val) => {
       </nav>
 
       <div class="theme-box">
+        <button @click="handleLogout" class="logout-btn">
+          <Icon name="logout" :size="16" />
+          <span>Keluar</span>
+        </button>
         <div class="theme-row">
           <span class="theme-label">
             <!-- matahari = terangg , bulan = gelapp , ganti sesuai isDark -->
@@ -125,5 +138,25 @@ watch(isDark, (val) => {
 .theme-label svg {
   flex-shrink: 0;
   color: var(--text-muted);
+}
+.logout-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  margin-bottom: 10px;
+  border: none;
+  border-radius: 6px;
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.2s, color 0.2s;
+}
+.logout-btn:hover {
+  background: var(--danger);
+  color: white;
 }
 </style>
