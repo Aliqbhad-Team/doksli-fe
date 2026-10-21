@@ -1,62 +1,25 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import Select from 'primevue/select'
 import Button from 'primevue/button'
 import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
-
-const logs: Record<string, string>[] = [
-  {
-    time: '21 Oct 2026, 14:32',
-    user: 'Ahmad Ridho',
-    action: 'Unggah dokumen',
-    object: 'Kontrak Pemeliharaan HVAC 2026',
-    ip: '192.168.1.45'
-  },
-  {
-    time: '21 Oct 2026, 13:15',
-    user: 'Dewi Kusuma',
-    action: 'Pindahkan ke tempat sampah',
-    object: 'Draft Laporan Q3',
-    ip: '192.168.1.78'
-  },
-  {
-    time: '21 Oct 2026, 11:45',
-    user: 'Ahmad Ridho',
-    action: 'Unduh dokumen',
-    object: 'Laporan Audit Triwulan III',
-    ip: '192.168.1.45'
-  },
-  {
-    time: '21 Oct 2026, 10:20',
-    user: 'System',
-    action: 'Membuat folder',
-    object: 'Arsip Legal 2026',
-    ip: '127.0.0.1'
-  },
-  {
-    time: '20 Oct 2026, 16:55',
-    user: 'Siti Nurhaliza',
-    action: 'Pulihkan',
-    object: 'MOU Kerjasama Gedung',
-    ip: '192.168.1.102'
-  },
-  {
-    time: '20 Oct 2026, 14:30',
-    user: 'Budi Santoso',
-    action: 'Edit metadata',
-    object: 'Kontrak Sewa Lokasi',
-    ip: '192.168.1.88'
-  }
-]
+import { auditLog } from '../data/sampleData'
 
 const user = ref<string | null>(null)
 const action = ref<string | null>(null)
-const users = ['Ahmad Ridho', 'Dewi Kusuma', 'Siti Nurhaliza', 'Budi Santoso', 'System']
-const actions = ['Unggah dokumen', 'Unduh dokumen', 'Pindahkan ke tempat sampah', 'Pulihkan', 'Edit metadata', 'Membuat folder']
+const users = [...new Set(auditLog.map(l => l.user))].sort()
+const actions = [...new Set(auditLog.map(l => l.action))].sort()
+
+const filteredLogs = computed(() => {
+  let logs = auditLog
+  if (user.value) logs = logs.filter(l => l.user === user.value)
+  if (action.value) logs = logs.filter(l => l.action === action.value)
+  return logs
+})
 
 function exportCsv() {
-  const csv = 'Waktu,Pengguna,Aksi,Objek,IP\n' + logs
+  const csv = 'Waktu,Pengguna,Aksi,Objek,IP\n' + filteredLogs.value
     .map(r => `"${r.time}","${r.user}","${r.action}","${r.object}","${r.ip}"`)
     .join('\n')
   const blob = new Blob([csv], { type: 'text/csv' })
@@ -70,7 +33,7 @@ function exportCsv() {
 </script>
 
 <template>
-  <div class="flex flex-col gap-3">
+  <div class="flex flex-col gap-5">
     <div class="panel">
       <div class="panel-body">
         <div class="filters" style="align-items:center">
@@ -103,7 +66,7 @@ function exportCsv() {
 
     <div class="panel">
       <div class="panel-body p-0">
-        <DataTable :value="logs">
+        <DataTable :value="filteredLogs" :paginator="true" :rows="10" responsiveLayout="scroll">
           <template #empty>
             <div class="empty">
               <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
@@ -128,4 +91,28 @@ function exportCsv() {
   font-weight: 600 !important;
   font-size: 13px !important;
 }
+.filters { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.filters :deep(.p-select) { min-width: 170px; }
+:deep(.p-datatable-thead > tr > th) {
+  background: var(--surface) !important;
+  color: var(--text-muted) !important;
+  font-size: 11px !important;
+  text-transform: uppercase !important;
+  letter-spacing: .04em !important;
+  font-weight: 600 !important;
+  padding: 8px 10px !important;
+  border-bottom: 1px solid var(--border) !important;
+  white-space: nowrap !important;
+}
+:deep(.p-datatable-tbody > tr > td) {
+  padding: 10px !important;
+  border-bottom: 1px solid var(--border) !important;
+  font-size: 13px !important;
+  vertical-align: middle !important;
+  background: var(--surface) !important;
+}
+:deep(.p-datatable-tbody > tr:last-child > td) { border-bottom: none !important; }
+:deep(.p-datatable-emptymessage > td) { padding: 0 !important; border: none !important; }
+.empty { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 32px; color: var(--text-muted); text-align: center; }
+.empty svg { opacity: 0.4; }
 </style>

@@ -8,9 +8,9 @@ import Column from 'primevue/column'
 import Button from 'primevue/button'
 import Drawer from 'primevue/drawer'
 import { usePermission } from '../composables/usePermission'
-import { folders as allFolders } from '../data/sampleData'
+import { folders, documents, categories, fmtSize } from '../data/sampleData'
 
-const { canTrashDoc, canUploadVersionDoc, currentUser, isAdmin } = usePermission()
+const { canTrashDoc, canUploadVersionDoc, canManageAccess, isAdmin, filterVisibleFolders } = usePermission()
 
 const q = ref('')
 const category = ref<string | null>(null)
@@ -24,106 +24,79 @@ const openDocumentDrawer = (doc: any) => {
   showDocumentDrawer.value = true
 }
 
-const getCategoryClass = (cat: string) => {
-  const map: Record<string, string> = {
-    'Kontrak': 'Kontrak',
-    'Keuangan': 'Keuangan',
-    'SDM': 'SDM',
-    'Legal': 'Legal',
-    'Korespondensi': 'Korespondensi'
-  }
-  return map[cat] || cat.replace(/\s+/g, '')
+const categoryColors: Record<string, { bg: string; fg: string }> = {
+  Kontrak: { bg: 'var(--primary-soft)', fg: 'var(--primary)' },
+  Keuangan: { bg: 'var(--success-soft)', fg: 'var(--success)' },
+  SDM: { bg: 'var(--warning-soft)', fg: 'var(--warning)' },
+  Legal: { bg: 'var(--danger-soft)', fg: 'var(--danger)' },
+  Korespondensi: { bg: 'var(--purple-soft)', fg: 'var(--purple)' },
 }
 
-const getLevelClass = (level: string) => {
-  const map: Record<string, string> = {
-    'Admin': 'Admin',
-    'Pengelola': 'Pengelola',
-    'Pembaca': 'Pembaca',
-    'Pengguna': 'Pengguna'
-  }
-  return map[level] || level.replace(/\s+/g, '')
+const levelColors: Record<string, { bg: string; fg: string }> = {
+  Admin: { bg: 'var(--danger-soft)', fg: 'var(--danger)' },
+  Pengelola: { bg: 'var(--primary-soft)', fg: 'var(--primary)' },
+  Pembaca: { bg: 'var(--success-soft)', fg: 'var(--success)' },
+  Pengguna: { bg: 'var(--warning-soft)', fg: 'var(--warning)' },
 }
 
-const docs: Record<string, any>[] = [
-  {
-    name: 'Kontrak Pemeliharaan HVAC 2026',
-    category: 'Kontrak',
-    owner: 'Ahmad Ridho',
-    date: '2026-10-19',
-    size: '2.4 MB',
-    version: '1.2',
-    level: 'Pengelola',
-    id: 'D1',
-    folder: 'Legal',
-    unit: 'Legal',
-    tags: ['hvac', 'maintenance'],
-    access_level: 'Kelola',
-    created_by: 'Taufik Nugraha',
-    status: 'Aktif',
-    versions: [
-      { versi: 'v1.2', desc: 'Perbaruan kontrak', tanggal: '19 Oct 2026', author: 'Ahmad Ridho', size: '2.4 MB' },
-      { versi: 'v1.1', desc: 'Revisi pasal 3', tanggal: '18 Oct 2026', author: 'Taufik Nugraha', size: '2.3 MB' },
-      { versi: 'v1.0', desc: 'Unggahan awal', tanggal: '15 Oct 2026', author: 'Taufik Nugraha', size: '2.2 MB' }
-    ],
-    activities: [
-      { time: '19 Oct 2026, 10:45', actor: 'Ahmad Ridho', action: 'Unggah dokumen' },
-      { time: '18 Oct 2026, 14:15', actor: 'Taufik Nugraha', action: 'Perbarui dokumen' },
-      { time: '15 Oct 2026, 09:30', actor: 'Taufik Nugraha', action: 'Buat dokumen' }
-    ]
-  },
-  {
-    name: 'Laporan Audit Triwulan III',
-    category: 'Keuangan',
-    owner: 'Dewi Kusuma',
-    date: '2026-10-05',
-    size: '1.8 MB',
-    version: '2.0',
-    level: 'Pembaca',
-    id: 'D2',
-    folder: 'Finansial',
-    unit: 'Keuangan',
-    tags: ['audit', 'quarterly'],
-    access_level: 'Lihat',
-    created_by: 'Anas',
-    status: 'Aktif',
-    versions: [
-      { versi: 'v2.0', desc: 'Final report', tanggal: '05 Oct 2026', author: 'Anas', size: '1.8 MB' },
-      { versi: 'v1.0', desc: 'Unggahan awal', tanggal: '01 Oct 2026', author: 'Anas', size: '1.6 MB' }
-    ],
-    activities: [
-      { time: '05 Oct 2026, 16:20', actor: 'Anas', action: 'Finalisasi dokumen' },
-      { time: '01 Oct 2026, 08:00', actor: 'Anas', action: 'Buat dokumen' }
-    ]
-  }
-]
+function getCategoryClass(cat: string) {
+  const c = categoryColors[cat] || { bg: 'var(--surface-2)', fg: 'var(--text-muted)' }
+  return { background: c.bg, color: c.fg }
+}
 
-// Computed: visible dokumen per role
+function getLevelClass(level: string) {
+  const c = levelColors[level] || { bg: 'var(--surface-2)', fg: 'var(--text-muted)' }
+  return { background: c.bg, color: c.fg }
+}
+
+// Computed: visible dokumen per role + filters
 const visibleDocs = computed(() => {
-  // Admin: lihat semua
-  if (isAdmin.value) return docs
-  
-  // Pengelola + Pengguna: filter by unit
-  return docs.filter(d => d.unit === currentUser.value?.unit)
+  let docs = documents.filter(d => {
+    if (!includeTrash.value && d.deletedAt) return false
+    return true
+  })
+
+  if (q.value) {
+    const search = q.value.toLowerCase()
+    docs = docs.filter(d => 
+      d.name.toLowerCase().includes(search) ||
+      d.category.toLowerCase().includes(search) ||
+      d.owner.toLowerCase().includes(search) ||
+      d.tags.some(t => t.toLowerCase().includes(search))
+    )
+  }
+
+  if (category.value) {
+    docs = docs.filter(d => d.category === category.value)
+  }
+
+  if (folder.value) {
+    docs = docs.filter(d => d.folderId === folder.value)
+  }
+
+  // Role-based filter
+  if (!isAdmin.value) {
+    const userFolders = filterVisibleFolders.value.map(f => f.id)
+    docs = docs.filter(d => userFolders.includes(d.folderId))
+  }
+
+  return docs
 })
 
-function handleDownload(doc: Record<string, any>) {
+const folderOptions = computed(() => filterVisibleFolders.value.map(f => ({ label: f.name, value: f.id })))
+
+function handleDownload(doc: any) {
   console.log('Download:', doc.name)
 }
 
-function handleTrash(doc: Record<string, any>) {
+function handleTrash(doc: any) {
   console.log('Trash:', doc.name)
 }
-
-const categories = ['Kontrak', 'Keuangan', 'SDM', 'Legal', 'Korespondensi']
-const folderOptions = [
-  { label: 'Divisi Hukum', value: 'f1' },
-  { label: 'Operasional Gedung', value: 'f2' }
-]
 </script>
 
 <template>
-  <div class="flex flex-col gap-3">
+  <div class="flex flex-col gap-5">
+    <!-- Search Panel -->
     <div class="panel">
       <div class="panel-body flex flex-col gap-3">
         <InputText
@@ -134,7 +107,7 @@ const folderOptions = [
         <div class="filters">
           <Select
             v-model="category"
-            :options="categories"
+            :options="categories.map(c => ({ label: c.name, value: c.name }))"
             placeholder="Semua kategori"
             showClear
           />
@@ -154,6 +127,7 @@ const folderOptions = [
       </div>
     </div>
 
+    <!-- Results Panel -->
     <div class="panel">
       <div class="panel-head">
         <h2>{{ visibleDocs.length }} hasil ditemukan</h2>
@@ -179,40 +153,45 @@ const folderOptions = [
               </div>
             </template>
           </Column>
-          <Column field="category" header="Kategori">
+          <Column field="category" header="Kategori" style="width: 120px">
             <template #body="slotProps">
-              <span :class="'pill cat-' + getCategoryClass(slotProps.data.category)"><span class="dot"></span>{{ slotProps.data.category }}</span>
+              <span class="pill" :style="getCategoryClass(slotProps.data.category)">
+                <span class="dot" :style="{ background: categoryColors[slotProps.data.category]?.fg || 'var(--text-muted)' }"></span>
+                {{ slotProps.data.category }}
+              </span>
             </template>
           </Column>
-          <Column field="owner" header="Pemilik">
+          <Column field="owner" header="Pemilik" style="width: 140px">
             <template #body="slotProps">
               <span class="muted">{{ slotProps.data.owner }}</span>
             </template>
           </Column>
-          <Column field="date" header="Tanggal">
+          <Column field="date" header="Tanggal" style="width: 110px">
             <template #body="slotProps">
               <span class="num">{{ slotProps.data.date }}</span>
             </template>
           </Column>
-          <Column field="size" header="Ukuran">
+          <Column field="size" header="Ukuran" style="width: 90px">
             <template #body="slotProps">
-              <span class="num">{{ slotProps.data.size }}</span>
+              <span class="num">{{ fmtSize(slotProps.data.size) }}</span>
             </template>
           </Column>
-          <Column field="version" header="Versi" style="width: 80px">
+          <Column field="versions" header="Versi" style="width: 80px">
             <template #body="slotProps">
-              <span class="num">v{{ slotProps.data.version }}</span>
+              <span class="num">v{{ slotProps.data.versions.length }}</span>
             </template>
           </Column>
           <Column field="level" header="Level Anda" style="width: 100px">
             <template #body="slotProps">
-              <span :class="'pill level-' + getLevelClass(slotProps.data.level)"><span class="dot"></span>{{ slotProps.data.level }}</span>
+              <span class="pill" :style="getLevelClass(slotProps.data.access_level)">
+                <span class="dot" :style="{ background: levelColors[slotProps.data.access_level]?.fg || 'var(--text-muted)' }"></span>
+                {{ slotProps.data.access_level }}
+              </span>
             </template>
           </Column>
-          <Column header="Aksi" style="width: 100px">
+          <Column header="Aksi" style="width: 130px">
             <template #body="slotProps">
-              <div class="action-buttons" style="display: flex; gap: 4px">
-                <!-- Download (everyone) -->
+              <div class="action-buttons">
                 <Button
                   icon="pi pi-download"
                   severity="secondary"
@@ -221,9 +200,8 @@ const folderOptions = [
                   @click="handleDownload(slotProps.data)"
                   title="Unduh"
                 />
-                <!-- Upload Versi (edit+) -->
                 <Button
-                  v-if="canUploadVersionDoc(slotProps.data, allFolders.find(f => f.name === slotProps.data.folder)!)"
+                  v-if="canUploadVersionDoc(slotProps.data)"
                   icon="pi pi-arrow-up"
                   severity="secondary"
                   text
@@ -231,15 +209,22 @@ const folderOptions = [
                   @click="console.log('Upload:', slotProps.data.name)"
                   title="Unggah Versi"
                 />
-                <!-- Trash (manage) -->
                 <Button
-                  v-if="canTrashDoc(slotProps.data, allFolders.find(f => f.name === slotProps.data.folder)!)"
+                  v-if="canTrashDoc(slotProps.data)"
                   icon="pi pi-trash"
                   severity="secondary"
                   text
                   size="small"
                   @click="handleTrash(slotProps.data)"
                   title="Pindahkan ke sampah"
+                />
+                <Button
+                  v-if="canManageAccess(slotProps.data)"
+                  icon="pi pi-lock"
+                  severity="secondary"
+                  text
+                  size="small"
+                  title="Kelola Akses"
                 />
               </div>
             </template>
@@ -248,13 +233,17 @@ const folderOptions = [
       </div>
     </div>
 
+    <!-- Document Detail Drawer -->
     <Drawer v-model:visible="showDocumentDrawer" header="Detail Dokumen" position="right" :modal="true" style="width: 420px">
       <div v-if="selectedDocument" style="display: flex; flex-direction: column; gap: 24px">
         <!-- HEADER -->
         <div style="display: flex; align-items: center; justify-content: space-between; width: 100%">
           <div>
             <h3 style="margin: 0 0 8px 0; font-size: 16px; font-weight: 700; color: var(--text)">{{ selectedDocument.name }}</h3>
-            <span :class="'pill cat-' + getCategoryClass(selectedDocument.category)"><span class="dot"></span>{{ selectedDocument.category }}</span>
+            <span class="pill" :style="getCategoryClass(selectedDocument.category)">
+              <span class="dot" :style="{ background: categoryColors[selectedDocument.category]?.fg || 'var(--text-muted)' }"></span>
+              {{ selectedDocument.category }}
+            </span>
           </div>
         </div>
 
@@ -264,7 +253,7 @@ const folderOptions = [
           <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px">
             <div>
               <div style="color: var(--text-muted); font-size: 11px; font-weight: 600; margin-bottom: 4px">FOLDER</div>
-              <div style="color: var(--text); font-size: 13px">{{ selectedDocument.folder }}</div>
+              <div style="color: var(--text); font-size: 13px">{{ folders.find(f => f.id === selectedDocument.folderId)?.name || '—' }}</div>
             </div>
             <div>
               <div style="color: var(--text-muted); font-size: 11px; font-weight: 600; margin-bottom: 4px">PEMILIK</div>
@@ -276,7 +265,7 @@ const folderOptions = [
             </div>
             <div>
               <div style="color: var(--text-muted); font-size: 11px; font-weight: 600; margin-bottom: 4px">UKURAN SAAT INI</div>
-              <div style="color: var(--text); font-size: 13px">{{ selectedDocument.size }}</div>
+              <div style="color: var(--text); font-size: 13px">{{ fmtSize(selectedDocument.size) }}</div>
             </div>
             <div>
               <div style="color: var(--text-muted); font-size: 11px; font-weight: 600; margin-bottom: 4px">ID DOKUMEN</div>
@@ -284,7 +273,7 @@ const folderOptions = [
             </div>
             <div>
               <div style="color: var(--text-muted); font-size: 11px; font-weight: 600; margin-bottom: 4px">STATUS</div>
-              <span style="display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 11.5px; font-weight: 600; background: rgba(16, 185, 129, 0.1); color: #10b981">{{ selectedDocument.status }}</span>
+              <span style="display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 11.5px; font-weight: 600; background: rgba(16, 185, 129, 0.1); color: #10b981">{{ selectedDocument.deletedAt ? 'Di Sampah' : 'Aktif' }}</span>
             </div>
           </div>
         </div>
@@ -299,7 +288,10 @@ const folderOptions = [
         <!-- AKSES -->
         <div>
           <div style="font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); font-weight: 700; margin-bottom: 12px">Akses Anda ke Dokumen Ini</div>
-          <span class="pill pill-danger"><span class="dot"></span>{{ selectedDocument.access_level }}</span>
+          <span class="pill" :style="getLevelClass(selectedDocument.access_level)">
+            <span class="dot" :style="{ background: levelColors[selectedDocument.access_level]?.fg || 'var(--text-muted)' }"></span>
+            {{ selectedDocument.access_level }}
+          </span>
         </div>
 
         <!-- RIWAYAT VERSI -->
@@ -308,10 +300,10 @@ const folderOptions = [
           <div style="display: flex; flex-direction: column; gap: 8px">
             <div v-for="(v, idx) in selectedDocument.versions" :key="idx" style="padding: 12px; background: var(--surface-2); border-radius: 6px">
               <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 6px">
-                <span style="display: inline-block; padding: 2px 8px; border-radius: 4px; background: var(--accent); color: white; font-size: 11px; font-weight: 700">{{ v.versi }}</span>
-                <span style="color: var(--text); font-size: 13px; font-weight: 500">{{ v.desc }}</span>
+                <span style="display: inline-block; padding: 2px 8px; border-radius: 4px; background: var(--primary); color: white; font-size: 11px; font-weight: 700">{{ v.versi }}</span>
+                <span style="color: var(--text); font-size: 13px; font-weight: 500">{{ v.note }}</span>
               </div>
-              <div style="color: var(--text-muted); font-size: 11px">{{ v.tanggal }} • {{ v.author }} • {{ v.size }}</div>
+              <div style="color: var(--text-muted); font-size: 11px">{{ v.tanggal }} • {{ v.uploader }} • {{ fmtSize(v.size) }}</div>
             </div>
           </div>
         </div>
@@ -355,87 +347,6 @@ const folderOptions = [
   width: 6px;
   height: 6px;
   border-radius: 50%;
-}
-
-.pill.cat-Kontrak {
-  background: rgba(59, 130, 246, 0.1);
-  color: #3b82f6;
-}
-
-.pill.cat-Kontrak .dot {
-  background: #3b82f6;
-}
-
-.pill.cat-LaporanKeuangan {
-  background: rgba(16, 185, 129, 0.1);
-  color: #10b981;
-}
-
-.pill.cat-LaporanKeuangan .dot {
-  background: #10b981;
-}
-
-.pill.cat-SDM {
-  background: rgba(245, 158, 11, 0.1);
-  color: #f59e0b;
-}
-
-.pill.cat-SDM .dot {
-  background: #f59e0b;
-}
-
-.pill.cat-Legal {
-  background: rgba(239, 68, 68, 0.1);
-  color: #ef4444;
-}
-
-.pill.cat-Legal .dot {
-  background: #ef4444;
-}
-
-.pill.cat-Korespondensi {
-  background: rgba(139, 92, 246, 0.1);
-  color: #8b5cf6;
-}
-
-.pill.cat-Korespondensi .dot {
-  background: #8b5cf6;
-}
-
-.pill.level-Admin {
-  background: rgba(220, 38, 38, 0.1);
-  color: #dc2626;
-}
-
-.pill.level-Admin .dot {
-  background: #dc2626;
-}
-
-.pill.level-Pengelola {
-  background: rgba(37, 99, 235, 0.1);
-  color: #2563eb;
-}
-
-.pill.level-Pengelola .dot {
-  background: #2563eb;
-}
-
-.pill.level-Pembaca {
-  background: rgba(22, 163, 74, 0.1);
-  color: #16a34a;
-}
-
-.pill.level-Pembaca .dot {
-  background: #16a34a;
-}
-
-.pill.level-Pengguna {
-  background: rgba(5, 150, 105, 0.1);
-  color: #059669;
-}
-
-.pill.level-Pengguna .dot {
-  background: #059669;
 }
 
 .action-buttons {
@@ -495,4 +406,16 @@ const folderOptions = [
 .pill.pill-danger .dot {
   background: #ef4444;
 }
+
+.muted { color: var(--text-muted); }
+.num { font-variant-numeric: tabular-nums; color: var(--text); font-size: 12.5px; }
+.docname { display: inline-flex; align-items: center; gap: 8px; font-weight: 500; color: var(--text); }
+.docname svg { flex-shrink: 0; color: var(--text-muted); }
+
+.filters { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+.filters :deep(.p-select) { min-width: 160px; }
+.filters :deep(.p-checkbox) { margin-top: 2px; }
+
+.empty { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 32px; color: var(--text-muted); text-align: center; }
+.empty svg { opacity: 0.4; }
 </style>
