@@ -1,19 +1,37 @@
 <script setup lang="ts">
-import { onMounted, ref, watch } from 'vue'
-import { RouterLink, RouterView, useRoute } from 'vue-router'
+import { computed, onMounted, ref, watch } from 'vue'
+import { RouterLink, RouterView, useRoute, useRouter } from 'vue-router'
+import { useAuthStore } from '../stores/auth'
 import { useTheme } from '../composables/useTheme'
+import { usePermission } from '../composables/usePermission'
 import ToggleSwitch from 'primevue/toggleswitch'
+import Icon from '../components/Icon.vue'
 
 const route = useRoute()
+const router = useRouter()
+const authStore = useAuthStore()
 const { theme, init, set } = useTheme()
+const { isAdmin, currentUser } = usePermission()
 
 const isDark = ref(false)
+const masterOpen = ref(false)
 
-const nav = [
+const navItems = computed(() => [
   { id: 'dashboard', label: 'Dashboard', icon: 'grid', to: '/dashboard' },
   { id: 'documents', label: 'Dokumen', icon: 'folder', to: '/dokumen' },
   { id: 'search', label: 'Pencarian', icon: 'search', to: '/pencarian' },
+])
+
+const adminNavItems = computed(() => [
   { id: 'audit', label: 'Log Audit', icon: 'clock', to: '/audit' },
+])
+
+const masterItems = [
+  { id: 'pengguna', label: 'Pengguna', to: '/master/pengguna' },
+  { id: 'units', label: 'Units', to: '/master/units' },
+  { id: 'grup', label: 'Grup', to: '/master/grup' },
+  { id: 'categories', label: 'Categories', to: '/master/categories' },
+  { id: 'tags', label: 'Tags', to: '/master/tags' },
 ]
 
 onMounted(() => {
@@ -24,6 +42,22 @@ onMounted(() => {
 watch(isDark, (val) => {
   set(val ? 'dark' : 'light')
 })
+
+const handleLogout = () => {
+  authStore.logout()
+  router.push('/login')
+}
+
+const toggleMaster = () => {
+  masterOpen.value = !masterOpen.value
+}
+
+function getCurrentPageTitle(): string {
+  const path = route.path
+  const allItems = [...navItems.value, ...adminNavItems.value, ...masterItems]
+  const match = allItems.find(item => path === item.to || path.startsWith(item.to + '/'))
+  return match?.label || 'Dashboard'
+}
 </script>
 
 <template>
@@ -31,66 +65,97 @@ watch(isDark, (val) => {
     <aside class="sidebar">
       <div class="brand">
         <span class="mark">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-            <rect x="3" y="4" width="18" height="4.2" rx="1"/>
-            <path d="M4.5 8.5v9a1.5 1.5 0 0 0 1.5 1.5h12a1.5 1.5 0 0 0 1.5-1.5v-9"/>
-            <path d="M10 12.5h4"/>
-          </svg>
+          <Icon name="archive" :size="18" />
         </span>
         <div>
           <div class="name">DoksliApp</div>
         </div>
       </div>
-      
+
       <nav id="nav">
-        <RouterLink 
-          v-for="item in nav" 
-          :key="item.id" 
-          :to="item.to" 
+        <RouterLink
+          v-for="item in navItems"
+          :key="item.id"
+          :to="item.to"
           class="navlink"
-          :class="{ active: route.path.startsWith(item.to) }"
+          :class="{ active: route.path === item.to || route.path.startsWith(item.to + '/') }"
         >
-          <svg v-if="item.icon === 'grid'" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-            <rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>
-          </svg>
-          <svg v-else-if="item.icon === 'folder'" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M3 6.5A1.5 1.5 0 0 1 4.5 5h4l1.7 2H19.5A1.5 1.5 0 0 1 21 8.5v9A1.5 1.5 0 0 1 19.5 19h-15A1.5 1.5 0 0 1 3 17.5z"/>
-          </svg>
-          <svg v-else-if="item.icon === 'search'" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-            <circle cx="10.5" cy="10.5" r="6.5"/><line x1="20" y1="20" x2="15.4" y2="15.4"/>
-          </svg>
-          <svg v-else-if="item.icon === 'clock'" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-            <circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>
-          </svg>
+          <Icon :name="item.icon" :size="16" />
           <span>{{ item.label }}</span>
         </RouterLink>
+
+        <RouterLink
+          v-for="item in adminNavItems"
+          :key="item.id"
+          :to="item.to"
+          class="navlink"
+          :class="{ active: route.path === item.to || route.path.startsWith(item.to + '/') }"
+        >
+          <Icon :name="item.icon" :size="16" />
+          <span>{{ item.label }}</span>
+        </RouterLink>
+
+        <!-- Master Dropdown (Admin only) -->
+        <template v-if="isAdmin">
+          <div class="nav-section">
+            <button
+              class="navlink master-toggle"
+              @click="toggleMaster"
+              :class="{ 'master-open': masterOpen }"
+              type="button"
+            >
+              <Icon name="settings" :size="16" />
+              <span>Master</span>
+              <Icon :name="masterOpen ? 'chevron-up' : 'chevron-down'" :size="14" class="chevron" />
+            </button>
+            <div class="master-dropdown" v-show="masterOpen">
+              <RouterLink
+                v-for="item in masterItems"
+                :key="item.id"
+                :to="item.to"
+                class="master-item"
+                :class="{ active: route.path === item.to || route.path.startsWith(item.to + '/') }"
+                @click="masterOpen = false"
+              >
+                <span>{{ item.label }}</span>
+              </RouterLink>
+            </div>
+          </div>
+        </template>
       </nav>
 
-      <div class="theme-box">
-        <div class="theme-row">
-          <span class="theme-label">
-            <!-- matahari = terangg , bulan = gelapp , ganti sesuai isDark -->
-            <svg v-if="!isDark" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-              <circle cx="12" cy="12" r="4.5"/><path d="M12 2.5v2M12 19.5v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2.5 12h2M19.5 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/>
-            </svg>
-            <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
-            </svg>
-            {{ isDark ? 'Mode Gelap' : 'Mode Terang' }}
-          </span>
-          <ToggleSwitch v-model="isDark" />
+      <div class="sidebar-footer">
+        <div class="theme-box">
+          <div class="theme-row">
+            <span class="theme-label">
+              <Icon :name="isDark ? 'moon' : 'sun'" :size="14" />
+              {{ isDark ? 'Mode Gelap' : 'Mode Terang' }}
+            </span>
+            <ToggleSwitch v-model="isDark" />
+          </div>
+        </div>
+
+        <!-- User Persona & Logout -->
+        <div class="user-persona" v-if="currentUser">
+          <div class="user-avatar">
+            <Icon name="user" :size="20" />
+          </div>
+          <div class="user-info">
+            <div class="user-name">{{ currentUser.name }}</div>
+            <div class="user-role">{{ currentUser.role?.name }}</div>
+          </div>
+          <button class="logout-btn" @click="handleLogout" title="Keluar">
+            <Icon name="log-out" :size="16" />
+          </button>
         </div>
       </div>
     </aside>
 
     <main>
       <div class="topbar">
-        <h1>{{ nav.find(n => route.path.startsWith(n.to))?.label || 'Dashboard' }}</h1>
-        <div class="persona">
-          Masuk sebagai <b>Bhadriko Pramudyaa</b>
-        </div>
+        <h1>{{ getCurrentPageTitle() }}</h1>
       </div>
-      
+
       <div id="view">
         <RouterView />
       </div>
@@ -99,19 +164,167 @@ watch(isDark, (val) => {
 </template>
 
 <style scoped>
+.app {
+  display: flex;
+  min-height: 100vh;
+  background: var(--bg);
+}
+
+.sidebar {
+  width: 224px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  padding: 16px 12px;
+  gap: 16px;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 8px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.mark {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: var(--accent);
+  color: var(--accent-contrast);
+}
+
+.name {
+  font-weight: 700;
+  font-size: 14px;
+  color: var(--text);
+  letter-spacing: -0.02em;
+}
+
+#nav {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+  overflow-y: auto;
+}
+
+.navlink {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  color: var(--text-muted);
+  text-decoration: none;
+  font-size: 13px;
+  font-weight: 500;
+  transition: all 0.15s ease;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  width: 100%;
+  text-align: left;
+}
+
+.navlink:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.navlink.active {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.navlink svg {
+  flex-shrink: 0;
+}
+
+.nav-section {
+  display: flex;
+  flex-direction: column;
+}
+
+.master-toggle {
+  justify-content: space-between;
+}
+
+.master-toggle .chevron {
+  transition: transform 0.2s ease;
+  color: var(--text-muted);
+}
+
+.master-toggle.master-open .chevron {
+  transform: rotate(180deg);
+}
+
+.master-dropdown {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 4px;
+  padding-left: 8px;
+  border-left: 2px solid var(--accent);
+  animation: slideDown 0.15s ease;
+}
+
+@keyframes slideDown {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.master-item {
+  display: flex;
+  align-items: center;
+  padding: 8px 10px;
+  border-radius: 6px;
+  color: var(--text-muted);
+  text-decoration: none;
+  font-size: 12.5px;
+  font-weight: 500;
+  transition: all 0.15s ease;
+}
+
+.master-item:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.master-item.active {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.sidebar-footer {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
 .theme-box {
-  margin-top: auto;
-  padding: 12px;
+  padding: 10px 12px;
   border: 1px solid var(--border);
   border-radius: 10px;
   background: var(--surface-2);
 }
+
 .theme-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
 }
+
 .theme-label {
   display: inline-flex;
   align-items: center;
@@ -122,8 +335,97 @@ watch(isDark, (val) => {
   letter-spacing: 0.05em;
   color: var(--text-muted);
 }
+
 .theme-label svg {
   flex-shrink: 0;
   color: var(--text-muted);
+}
+
+.user-persona {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+}
+
+.user-avatar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.user-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.user-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.user-role {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-muted);
+  text-transform: capitalize;
+}
+
+.logout-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.logout-btn:hover {
+  background: var(--danger-soft);
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.topbar {
+  padding: 16px 24px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.topbar h1 {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text);
+  margin: 0;
+}
+
+#view {
+  flex: 1;
+  padding: 24px;
+  overflow-y: auto;
 }
 </style>
