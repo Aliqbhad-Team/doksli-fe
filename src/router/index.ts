@@ -5,6 +5,11 @@ const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
   routes: [
     {
+      path: '/login',
+      name: 'login',
+      component: () => import('../views/LoginView.vue'),
+    },
+    {
       path: '/',
       component: MainLayout,
       children: [
@@ -31,6 +36,26 @@ const router = createRouter({
           path: 'audit',
           name: 'audit',
           component: () => import('../views/AuditView.vue'),
+        },
+        {
+          path: 'master/pengguna',
+          name: 'master-pengguna',
+          component: () => import('../views/master/MasterPenggunaView.vue'),
+        },
+        {
+          path: 'master/unit',
+          name: 'master-unit',
+          component: () => import('../views/master/MasterUnitsView.vue'),
+        },
+        {
+          path: 'master/grup',
+          name: 'master-grup',
+          component: () => import('../views/master/MasterGrupView.vue'),
+        },
+        {
+          path: 'master/kategori',
+          name: 'master-kategori',
+          component: () => import('../views/master/MasterCategoriesView.vue'),
         },
       ],
     },
