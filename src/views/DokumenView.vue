@@ -5,10 +5,7 @@ import Button from 'primevue/button'
 import InputText from 'primevue/inputtext'
 import Textarea from 'primevue/textarea'
 import Select from 'primevue/select'
-import Checkbox from 'primevue/checkbox'
-import api from '../services/api'
-import { useDocumentsStore, type Doc, type DocVersion } from '../stores/documents'
-import { users as sampleUsers, groups as sampleGroups } from '../data/sampleData'
+import { useDocumentsStore, type Doc, type Folder } from '../stores/documents'
 import { useAuthStore } from '../stores/auth'
 import { useAppConfirm } from '../composables/useAppConfirm'
 
@@ -16,277 +13,163 @@ const store = useDocumentsStore()
 const authStore = useAuthStore()
 const { confirmDelete, confirmAction } = useAppConfirm()
 
-// Role & Hierarchy based on Auth
-const userRole = computed(() => (authStore.userRole || 'Admin').toLowerCase())
-const userUnitName = computed(() => {
-  const u = authStore.user?.unit
-  if (!u) return ''
-  if (typeof u === 'string') return u.toLowerCase().trim()
-  return (u.name || '').toLowerCase().trim()
-})
-
-// Dynamic Units & Categories from Backend API
-const dynamicUnits = ref<{ id: string; name: string }[]>([])
-const dynamicCategories = ref<{ id?: string; name: string }[]>([])
-
-async function fetchDynamicMetadata() {
-  try {
-    const [unitsRes, catRes] = await Promise.allSettled([
-      api.get('/v1/units'),
-      api.get('/v1/categories'),
-    ])
-    if (unitsRes.status === 'fulfilled' && unitsRes.value.data?.data) {
-      dynamicUnits.value = unitsRes.value.data.data
-    }
-    if (catRes.status === 'fulfilled' && catRes.value.data?.data) {
-      dynamicCategories.value = catRes.value.data.data
-    }
-  } catch {
-    // fallback
-  }
-}
-
-onMounted(() => {
-  fetchDynamicMetadata()
-})
-
-const availableUnitNames = computed(() => {
-  const defaults = ['Kontrak', 'Keuangan', 'SDM', 'Legal', 'Korespondensi']
-  const fromApi = dynamicUnits.value.map(u => u.name)
-  const combined = Array.from(new Set([...fromApi, ...defaults]))
-  return combined
-})
-
-const availableCategoryNames = computed(() => {
-  const defaults = ['Kontrak', 'Keuangan', 'SDM', 'Legal', 'Korespondensi']
-  const fromApi = dynamicCategories.value.map(c => c.name)
-  const combined = Array.from(new Set([...fromApi, ...defaults]))
-  return combined
-})
-
-// Check if user can access a given folder
-function canAccessFolder(f: { id: string; name: string; unitId: string; restricted?: boolean }): boolean {
-  if (authStore.isAdmin || userRole.value === 'admin') {
-    return true
-  }
-
-  const fUnit = (f.unitId || f.name || '').toLowerCase().trim()
-
-  // Pengelola: hanya bisa akses folder unit terkait
-  if (userRole.value === 'pengelola') {
-    if (!userUnitName.value) return true
-    return fUnit === userUnitName.value
-  }
-
-  // Pengguna: default dapat akses folder unit terkait
-  if (userRole.value === 'pengguna' || userRole.value === 'user') {
-    if (!userUnitName.value) return true
-    return fUnit === userUnitName.value
-  }
-
-  return true
-}
-
-function selectFolder(f: { id: string; name: string; unitId: string; restricted?: boolean }) {
-  if (canAccessFolder(f)) {
-    currentFolderId.value = f.id
-  }
-}
-
-// Navigation & Tab states
-const currentFolderId = ref<string | null>(null) // null = Root (Daftar Folder)
+// ─── Folder Navigation & Tab State ───
+const currentFolder = ref<Folder | null>(null)
 const activeTab = ref<'aktif' | 'trash'>('aktif')
-
-// Detail Drawer state
 const selectedDoc = ref<Doc | null>(null)
 const isDrawerOpen = ref(false)
 
-// Modals state
-const isUploadModalOpen = ref(false)
-const isVersionModalOpen = ref(false)
-const isFolderModalOpen = ref(false)
-const isPermModalOpen = ref(false)
-const permTargetType = ref<'folder' | 'doc'>('folder')
-const selectedPermDoc = ref<Doc | null>(null)
+// ─── Add Folder State ───
+const isAddFolderModalOpen = ref(false)
+const folderForm = ref({
+  name: '',
+  unit_id: '',
+})
+const folderSubmitting = ref(false)
 
-// Form states
+// ─── Upload Document State ───
+const isUploadModalOpen = ref(false)
 const newDoc = ref({
   name: '',
-  folderId: 'f1',
-  category: 'Kontrak',
+  folder_id: '',
+  category_id: '',
   tags: '',
-  fileSize: 1024,
   note: 'Unggahan awal',
 })
+const uploadFile = ref<File | null>(null)
+const submitting = ref(false)
 
-const newVersion = ref({
-  note: '',
-  fileSize: 2048,
-})
+// ─── Version Upload State ───
+const isVersionModalOpen = ref(false)
+const versionFile = ref<File | null>(null)
+const versionNote = ref('')
 
-const newFolder = ref({
-  name: '',
-  unitId: 'Kontrak',
-  restricted: false,
-})
+// ─── Computed Permissions & Role ───
+const userRole = computed(() => (authStore.userRole || 'Admin').toLowerCase())
+const canAddFolder = computed(() => authStore.canManageFolder || authStore.isAdmin || userRole.value === 'pengelola')
 
-const permForm = ref<{
-  subjectType: 'user' | 'group'
-  subjectId: string
-  level: 'view' | 'edit' | 'manage'
-}>({
-  subjectType: 'user',
-  subjectId: '',
-  level: 'view',
-})
-
-// Current folder entity
-const currentFolder = computed(() => {
-  if (!currentFolderId.value) return null
-  return store.folders.find(f => f.id === currentFolderId.value) || store.folders[0] || null
-})
-
-// User access level inside current folder
-const userAccessLevel = computed<'Kelola' | 'Edit' | 'Unduh' | 'Lihat'>(() => {
-  if (authStore.isAdmin || userRole.value === 'admin') {
-    return 'Kelola'
-  }
-  if (userRole.value === 'pengelola') {
-    if (!currentFolder.value) return 'Kelola'
-    const fUnit = (currentFolder.value.unitId || currentFolder.value.name || '').toLowerCase().trim()
-    if (fUnit === userUnitName.value) {
-      return 'Kelola'
-    }
-    return 'Lihat'
-  }
-  if (userRole.value === 'pengguna' || userRole.value === 'user') {
-    return 'Edit'
-  }
-  return 'Lihat'
-})
-
-const canManageAccess = computed(() => {
-  return userAccessLevel.value === 'Kelola'
-})
-
-// Document counts per folder
-function getDocCountInFolder(folderId: string) {
-  return store.activeDocs.filter(d => d.folderId === folderId).length
+const canModify = (doc: Doc) => {
+  if (authStore.isAdmin || userRole.value === 'pengelola') return true
+  return doc.owner_id === authStore.user?.id
 }
 
-// Filtered documents when inside a folder or in trash
-const docsInFolder = computed(() => {
-  if (activeTab.value === 'trash') {
-    return store.trashedDocs
+// Documents filtered by current folder or all trashed
+const folderDocs = computed(() => {
+  if (!currentFolder.value) {
+    if (activeTab.value === 'trash') {
+      return store.trashedDocs
+    }
+    return []
   }
-  if (currentFolderId.value) {
-    return store.activeDocs.filter(d => d.folderId === currentFolderId.value)
-  }
-  return []
+  const list = activeTab.value === 'trash' ? store.trashedDocs : store.activeDocs
+  return list.filter(d => (d.folder_id || d.folderId) === currentFolder.value?.id)
 })
 
-// Permissions list for current context
-const currentPermissions = computed(() => {
-  const fId = permTargetType.value === 'doc'
-    ? selectedPermDoc.value?.folderId
-    : (currentFolderId.value || currentFolder.value?.id)
+function getFolderDocCount(folderId: string): number {
+  return store.activeDocs.filter(d => (d.folder_id || d.folderId) === folderId).length
+}
 
-  if (!fId) return []
-  return (store.folderPermissions || []).filter(p => p && p.folderId === fId)
+// ─── Lifecycle ───
+onMounted(async () => {
+  await Promise.allSettled([
+    store.fetchDocuments(),
+    store.fetchFolders(),
+    store.fetchCategories(),
+    store.fetchUnits(),
+  ])
 })
 
-// Users available for permission grant (active users with role 'Pengguna')
-const availableUsers = computed(() => {
+// ─── Folder Actions ───
+function openFolder(folder: Folder) {
+  currentFolder.value = folder
+  activeTab.value = 'aktif'
+}
+
+function closeFolder() {
+  currentFolder.value = null
+}
+
+function openAddFolderModal() {
+  const defaultUnit = authStore.isAdmin
+    ? (store.units[0]?.id || '')
+    : (authStore.user?.unit_id || '')
+
+  folderForm.value = {
+    name: '',
+    unit_id: defaultUnit,
+  }
+  isAddFolderModalOpen.value = true
+}
+
+async function submitAddFolder() {
+  if (!folderForm.value.name.trim()) return alert('Nama folder wajib diisi')
+  if (authStore.isAdmin && !folderForm.value.unit_id) {
+    return alert('Pilih unit untuk folder ini')
+  }
+
+  folderSubmitting.value = true
   try {
-    const s = localStorage.getItem('doksli-master-users')
-    if (s) {
-      const parsed = JSON.parse(s)
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        const activeUsers = parsed.filter((u: any) => u.status === 'active' && u.role === 'Pengguna')
-        if (activeUsers.length > 0) return activeUsers
-      }
+    const payload: { name: string; unit_id?: string } = {
+      name: folderForm.value.name.trim(),
     }
-  } catch {}
-  return sampleUsers.filter(u => u.status === 'active' && u.role === 'Pengguna')
-})
+    if (folderForm.value.unit_id) {
+      payload.unit_id = folderForm.value.unit_id
+    }
 
-// Groups available for permission grant
-const availableGroups = computed(() => {
+    await store.createFolder(payload)
+    isAddFolderModalOpen.value = false
+  } catch (e: any) {
+    alert(e.response?.data?.message || 'Gagal membuat folder')
+  } finally {
+    folderSubmitting.value = false
+  }
+}
+
+// ─── Upload Document Actions ───
+function openUploadModal() {
+  newDoc.value = {
+    name: '',
+    folder_id: currentFolder.value?.id || store.folders[0]?.id || '',
+    category_id: store.categories[0]?.id || '',
+    tags: '',
+    note: 'Unggahan awal',
+  }
+  uploadFile.value = null
+  isUploadModalOpen.value = true
+}
+
+async function submitUploadDoc() {
+  if (!newDoc.value.name.trim()) return alert('Nama dokumen wajib diisi')
+  if (!newDoc.value.folder_id) return alert('Pilih folder terlebih dahulu')
+  if (!newDoc.value.category_id) return alert('Pilih kategori terlebih dahulu')
+
+  submitting.value = true
   try {
-    const s = localStorage.getItem('doksli-master-groups')
-    if (s) {
-      const parsed = JSON.parse(s)
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed
-    }
-  } catch {}
-  return sampleGroups
-})
-
-// Subject options computed based on selected type
-const subjectOptions = computed(() => {
-  if (permForm.value.subjectType === 'user') {
-    const list = availableUsers.value || []
-    if (list.length === 0) {
-      return [{ id: 'u5', label: 'Nurhasan (unit Korespondensi)', name: 'Nurhasan' }]
-    }
-    return list.map(u => ({
-      id: u.id,
-      label: `${u.name} (unit ${u.unit || '-'})`,
-      name: u.name,
-    }))
-  } else {
-    const list = availableGroups.value || []
-    if (list.length === 0) {
-      return [{ id: 'g1', label: 'Tim Legal (2 anggota)', name: 'Tim Legal' }]
-    }
-    return list.map(g => ({
-      id: g.id,
-      label: `${g.name} (${g.memberIds?.length || 0} anggota)`,
-      name: g.name,
-    }))
-  }
-})
-
-function onSubjectTypeChange() {
-  permForm.value.subjectId = subjectOptions.value[0]?.id || ''
-  if (permForm.value.subjectType === 'user' && permForm.value.level === 'manage') {
-    permForm.value.level = 'edit'
+    await store.uploadDocument({
+      name: newDoc.value.name.trim(),
+      folder_id: newDoc.value.folder_id,
+      category_id: newDoc.value.category_id,
+      tags: newDoc.value.tags,
+      file: uploadFile.value,
+      note: newDoc.value.note,
+    })
+    isUploadModalOpen.value = false
+    await store.fetchDocuments()
+  } catch (e: any) {
+    alert(e.response?.data?.message ?? 'Gagal mengunggah dokumen')
+  } finally {
+    submitting.value = false
   }
 }
 
-function getSubjectDisplayName(p: any): string {
-  if (p && p.subjectName) return p.subjectName
-  if (p && p.subjectType === 'user') {
-    const u = availableUsers.value.find(x => x.id === p.subjectId) || sampleUsers.find(x => x.id === p.subjectId)
-    return u ? `${u.name} (unit ${u.unit || '-'})` : p.subjectId
-  }
-  if (p && p.subjectType === 'group') {
-    const g = availableGroups.value.find(x => x.id === p.subjectId) || sampleGroups.find(x => x.id === p.subjectId)
-    return g ? g.name : p.subjectId
-  }
-  return p ? (p.subjectId || '-') : '-'
+function handleFileChange(event: Event) {
+  const target = event.target as HTMLInputElement
+  uploadFile.value = target.files?.[0] ?? null
 }
 
-function getGranterName(grantedBy: any): string {
-  if (!grantedBy) return 'Admin'
-  const u = sampleUsers.find(x => x.id === grantedBy)
-  return u ? u.name : String(grantedBy)
-}
-
-// Current document version helpers
-function getCurrentVersion(doc: Doc): DocVersion | undefined {
-  if (!doc.versions || doc.versions.length === 0) return undefined
-  return doc.versions[doc.versions.length - 1]
-}
-
-function getFolderName(folderId: string): string {
-  const f = store.folders.find(x => x.id === folderId)
-  return f ? f.name : folderId
-}
-
-// Drawer helpers
-function openDocDetail(doc: Doc) {
-  selectedDoc.value = doc
+async function openDocDetail(doc: Doc) {
+  const full = await store.fetchDocument(doc.id)
+  selectedDoc.value = full || doc
   isDrawerOpen.value = true
 }
 
@@ -294,14 +177,6 @@ function closeDrawer() {
   isDrawerOpen.value = false
 }
 
-// Related audit activities for selected document
-const relatedActivities = computed(() => {
-  if (!selectedDoc.value) return []
-  const docName = selectedDoc.value.name.toLowerCase()
-  return store.auditLog.filter(a => a.object.toLowerCase().includes(docName)).slice(0, 5)
-})
-
-// Action handlers
 function handleDownload(doc: Doc) {
   store.downloadDocument(doc.id)
 }
@@ -310,205 +185,181 @@ function handleTrash(doc: Doc) {
   confirmDelete({
     title: 'Pindahkan ke Tempat Sampah',
     message: `Apakah Anda yakin ingin memindahkan "${doc.name}" ke tempat sampah?`,
-    submessage: 'Dokumen masih dapat dipulihkan dari tab Tempat Sampah.',
-    confirmLabel: 'Pindahkan',
-    onAccept: () => {
-      store.trashDocument(doc.id)
-      if (selectedDoc.value?.id === doc.id) {
-        closeDrawer()
+    submessage: 'Dokumen dapat dipulihkan kapan saja dari tab Tempat Sampah.',
+    confirmLabel: 'Pindahkan ke Sampah',
+    onAccept: async () => {
+      try {
+        await store.trashDocument(doc.id)
+        if (selectedDoc.value?.id === doc.id) closeDrawer()
+      } catch (e: any) {
+        alert(e.response?.data?.message ?? 'Gagal memindahkan ke tempat sampah')
       }
     },
   })
 }
 
 function handleRestore(doc: Doc) {
-  store.restoreDocument(doc.id)
-}
-
-function handlePurge(doc: Doc) {
-  confirmDelete({
-    title: 'Hapus Permanen Dokumen',
-    message: `Apakah Anda yakin ingin menghapus permanen "${doc.name}"?`,
-    submessage: 'Tindakan ini tidak dapat dibatalkan dan seluruh riwayat versi dokumen ini akan terhapus.',
-    confirmLabel: 'Hapus Permanen',
-    onAccept: () => {
-      store.purgeDocument(doc.id)
-      if (selectedDoc.value?.id === doc.id) {
-        closeDrawer()
+  confirmAction({
+    title: 'Pulihkan Dokumen',
+    message: `Pulihkan "${doc.name}" ke daftar dokumen aktif?`,
+    confirmLabel: 'Pulihkan',
+    onAccept: async () => {
+      try {
+        await store.restoreDocument(doc.id)
+        if (selectedDoc.value?.id === doc.id) closeDrawer()
+      } catch (e: any) {
+        alert(e.response?.data?.message ?? 'Gagal memulihkan dokumen')
       }
     },
   })
 }
 
-function handleRevertVersion(vnum: number) {
-  if (!selectedDoc.value) return
-  confirmAction({
-    title: 'Pulihkan Versi Dokumen',
-    message: `Jadikan versi v${vnum} sebagai versi aktif baru?`,
-    submessage: 'Versi aktif dokumen akan diperbarui dengan data dari versi terpilih.',
-    confirmLabel: 'Jadikan Aktif',
-    icon: 'clock',
-    severity: 'info',
-    onAccept: () => {
-      store.revertVersion(selectedDoc.value!.id, vnum)
-      const updated = store.documents.find(d => d.id === selectedDoc.value?.id)
-      if (updated) selectedDoc.value = updated
+function handlePurge(doc: Doc) {
+  confirmDelete({
+    title: 'Hapus Dokumen Secara Permanen',
+    message: `Hapus permanen "${doc.name}"?`,
+    submessage: 'Tindakan ini tidak dapat dibatalkan. File dan seluruh riwayat versi akan terhapus.',
+    confirmLabel: 'Hapus Permanen',
+    onAccept: async () => {
+      try {
+        await store.deleteDocument(doc.id)
+        if (selectedDoc.value?.id === doc.id) closeDrawer()
+      } catch (e: any) {
+        alert(e.response?.data?.message ?? 'Gagal menghapus permanen')
+      }
     },
   })
 }
 
-// Modal Handlers
-function openUploadModal() {
-  newDoc.value = {
-    name: '',
-    folderId: currentFolderId.value || store.folders[0]?.id || 'f1',
-    category: availableCategoryNames.value[0] || 'Kontrak',
-    tags: '',
-    fileSize: Math.floor(Math.random() * 2000) + 500,
-    note: 'Unggahan awal dokumen',
-  }
-  isUploadModalOpen.value = true
-}
-
-function submitUploadDoc() {
-  if (!newDoc.value.name.trim()) return alert('Nama dokumen wajib diisi')
-  store.uploadDocument({
-    name: newDoc.value.name.trim(),
-    folderId: newDoc.value.folderId,
-    category: newDoc.value.category,
-    tags: newDoc.value.tags.split(',').map(t => t.trim()).filter(Boolean),
-    size: newDoc.value.fileSize,
-    note: newDoc.value.note.trim(),
-  })
-  isUploadModalOpen.value = false
-}
-
-function openVersionModal() {
-  newVersion.value = {
-    note: '',
-    fileSize: Math.floor(Math.random() * 2500) + 800,
-  }
+// ─── Version Upload ───
+function openVersionModal(doc: Doc) {
+  selectedDoc.value = doc
+  versionFile.value = null
+  versionNote.value = ''
   isVersionModalOpen.value = true
 }
 
-function submitUploadVersion() {
+function handleVersionFileChange(event: Event) {
+  const target = event.target as HTMLInputElement
+  versionFile.value = target.files?.[0] ?? null
+}
+
+async function submitUploadVersion() {
+  if (!versionFile.value) return alert('Pilih file terlebih dahulu')
   if (!selectedDoc.value) return
-  store.uploadVersion(selectedDoc.value.id, newVersion.value.note, newVersion.value.fileSize)
-  const updated = store.documents.find(d => d.id === selectedDoc.value?.id)
-  if (updated) selectedDoc.value = updated
-  isVersionModalOpen.value = false
-}
-
-function openAddFolderModal() {
-  let defaultUnit = availableUnitNames.value[0] || 'Kontrak'
-  if (userUnitName.value) {
-    const matched = availableUnitNames.value.find(u => u.toLowerCase() === userUnitName.value)
-    if (matched) defaultUnit = matched
-  }
-
-  newFolder.value = {
-    name: '',
-    unitId: defaultUnit,
-    restricted: false,
-  }
-  isFolderModalOpen.value = true
-}
-
-function submitAddFolder() {
-  if (!newFolder.value.name.trim()) return alert('Nama folder wajib diisi')
-  store.addFolder(
-    newFolder.value.name.trim(),
-    newFolder.value.unitId,
-    newFolder.value.restricted
-  )
-  isFolderModalOpen.value = false
-}
-
-// Open Kelola Akses from Folder Header
-function openFolderPermModal() {
-  permTargetType.value = 'folder'
-  selectedPermDoc.value = null
-  isPermModalOpen.value = true
-  permForm.value.subjectType = 'user'
-  permForm.value.level = 'view'
-  if (subjectOptions.value && subjectOptions.value.length > 0) {
-    permForm.value.subjectId = subjectOptions.value[0].id
+  submitting.value = true
+  try {
+    await store.uploadVersion(selectedDoc.value.id, versionFile.value, versionNote.value)
+    isVersionModalOpen.value = false
+    const full = await store.fetchDocument(selectedDoc.value.id)
+    if (full) selectedDoc.value = full
+    await store.fetchDocuments()
+  } catch (e: any) {
+    alert(e.response?.data?.message ?? 'Gagal upload versi')
+  } finally {
+    submitting.value = false
   }
 }
 
-// Open Kelola Akses from Doc Drawer
-function openDocPermModal(doc: Doc) {
-  permTargetType.value = 'doc'
-  selectedPermDoc.value = doc
-  isPermModalOpen.value = true
-  permForm.value.subjectType = 'user'
-  permForm.value.level = 'view'
-  if (subjectOptions.value && subjectOptions.value.length > 0) {
-    permForm.value.subjectId = subjectOptions.value[0].id
+// ─── Helper Functions ───
+function getCategoryName(doc: Doc): string {
+  return doc.category?.name || doc.categoryName || (typeof doc.category === 'string' ? doc.category : '-')
+}
+
+function getOwnerName(doc: Doc): string {
+  return doc.owner?.name || doc.ownerName || (typeof doc.owner === 'string' ? doc.owner : '-')
+}
+
+function getFolderName(folderId?: string): string {
+  if (!folderId) return '-'
+  const f = store.folders.find(x => x.id === folderId)
+  return f ? f.name : folderId
+}
+
+function isDocTrashed(doc: Doc): boolean {
+  return doc.status === 'trashed' || !!doc.deleted_at || !!doc.deletedAt
+}
+
+function getCurrentVersion(doc: Doc): any {
+  if (doc.latest_version) {
+    return {
+      v: doc.latest_version.version_number,
+      size: doc.latest_version.size_bytes,
+      uploader: doc.latest_version.uploader?.name || 'Admin',
+      note: doc.latest_version.note,
+      checksum: doc.latest_version.checksum,
+    }
+  }
+  if (!doc.versions || doc.versions.length === 0) {
+    return { v: 1, size: doc.size || 0, uploader: 'Admin' }
+  }
+  const last = doc.versions[doc.versions.length - 1]
+  return {
+    v: last.version_number ?? (last as any).v ?? 1,
+    size: last.size_bytes ?? (last as any).size ?? 0,
+    uploader: last.uploader?.name ?? (last as any).uploader ?? 'Admin',
+    note: last.note,
+    checksum: last.checksum,
   }
 }
 
-function submitGrantPermission() {
-  const folderId = permTargetType.value === 'doc'
-    ? selectedPermDoc.value?.folderId
-    : (currentFolderId.value || currentFolder.value?.id)
-
-  if (!folderId) return
-  if (!permForm.value.subjectId) return alert('Pilih subjek terlebih dahulu')
-
-  if (permForm.value.subjectType === 'user' && permForm.value.level === 'manage') {
-    return alert('Pengguna individual tidak boleh diberi level "Kelola"')
-  }
-
-  const selectedOpt = subjectOptions.value.find(o => o.id === permForm.value.subjectId)
-  const subjectName = selectedOpt ? selectedOpt.name : permForm.value.subjectId
-
-  store.grantFolderPermission({
-    folderId,
-    subjectType: permForm.value.subjectType,
-    subjectId: permForm.value.subjectId,
-    subjectName,
-    level: permForm.value.level,
-  })
-
-  alert(`Akses berhasil diberikan ke ${subjectName}`)
+function getCategoryBadgeColor(catName: string) {
+  const normalized = (catName || '').toLowerCase().trim()
+  if (normalized.includes('kontrak')) return { bg: 'rgba(59, 130, 246, 0.18)', text: '#60a5fa', dot: '#3b82f6' }
+  if (normalized.includes('keuangan')) return { bg: 'rgba(16, 185, 129, 0.18)', text: '#34d399', dot: '#10b981' }
+  if (normalized.includes('proposal')) return { bg: 'rgba(245, 158, 11, 0.18)', text: '#fbbf24', dot: '#f59e0b' }
+  if (normalized.includes('masuk')) return { bg: 'rgba(6, 182, 212, 0.18)', text: '#22d3ee', dot: '#06b6d4' }
+  if (normalized.includes('keluar')) return { bg: 'rgba(168, 85, 247, 0.18)', text: '#c084fc', dot: '#a855f7' }
+  if (normalized.includes('rapat') || normalized.includes('notulen')) return { bg: 'rgba(139, 92, 246, 0.18)', text: '#a78bfa', dot: '#8b5cf6' }
+  if (normalized.includes('acara')) return { bg: 'rgba(20, 184, 166, 0.18)', text: '#2dd4bf', dot: '#14b8a6' }
+  if (normalized.includes('sdm')) return { bg: 'rgba(234, 88, 12, 0.18)', text: '#fb923c', dot: '#ea580c' }
+  if (normalized.includes('legal')) return { bg: 'rgba(239, 68, 68, 0.18)', text: '#f87171', dot: '#ef4444' }
+  return { bg: 'rgba(148, 163, 184, 0.18)', text: '#cbd5e1', dot: '#94a3b8' }
 }
 
-function revokePerm(permId: string) {
-  confirmDelete({
-    title: 'Cabut Izin Akses',
-    message: 'Apakah Anda yakin ingin mencabut izin akses folder ini?',
-    submessage: 'Subjek yang bersangkutan tidak akan memiliki akses khusus lagi ke folder ini.',
-    confirmLabel: 'Cabut Izin',
-    onAccept: () => {
-      store.revokeFolderPermission(permId)
-    },
-  })
+function getUserLevel(doc: Doc) {
+  if (canModify(doc)) {
+    return {
+      label: 'Kelola',
+      color: '#f87171',
+      dot: '#ef4444',
+    }
+  }
+  return {
+    label: 'Lihat',
+    color: '#94a3b8',
+    dot: '#64748b',
+  }
 }
 </script>
 
 <template>
   <div class="panel">
-    <!-- Panel Head: Breadcrumbs / Title + Actions -->
+    <!-- ═══════════════════════════════════════════════════════ -->
+    <!-- PANEL HEAD: BREADCRUMBS & ACTION BUTTONS               -->
+    <!-- ═══════════════════════════════════════════════════════ -->
     <div class="panel-head">
       <div class="crumbs">
         <button
           type="button"
-          :class="{ current: !currentFolderId }"
-          @click="currentFolderId = null"
+          :class="{ current: !currentFolder }"
+          @click="closeFolder"
         >
           Semua Folder
         </button>
         <template v-if="currentFolder">
-          <span class="muted">/</span>
-          <button type="button" class="current">{{ currentFolder.name }}</button>
+          <span>›</span>
+          <button type="button" class="current font-bold">
+            {{ currentFolder.name }}
+            <span class="muted font-normal">(unit {{ currentFolder.unit?.name || currentFolder.name }})</span>
+          </button>
         </template>
       </div>
 
       <div class="flex items-center gap-2">
-        <!-- Jika di Semua Folder: tampilkan + Tambah Folder (Admin & Pengelola) -->
+        <!-- Tambah Folder (hanya saat di Semua Folder, untuk Admin/Pengelola) -->
         <button
-          v-if="!currentFolderId && (authStore.isAdmin || userRole === 'pengelola')"
+          v-if="!currentFolder && canAddFolder"
           type="button"
           class="btn ghost sm"
           @click="openAddFolderModal"
@@ -516,25 +367,23 @@ function revokePerm(permId: string) {
           + Tambah Folder
         </button>
 
-        <!-- Jika di dalam Folder: berubah menjadi Kelola Akses dengan icon perisai bercentang (Khusus level Kelola) -->
+        <!-- Kelola Akses / Kembali (saat berada di dalam folder) -->
         <button
-          v-else-if="currentFolderId && canManageAccess"
+          v-if="currentFolder"
           type="button"
-          class="btn ghost sm flex items-center gap-1.5 cursor-pointer"
-          style="cursor: pointer"
-          @click.stop="openFolderPermModal"
+          class="btn ghost sm"
+          @click="closeFolder"
         >
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-accent">
-            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
-            <path d="m9 12 2 2 4-4"/>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="mr-1">
+            <polyline points="15 18 9 12 15 6"></polyline>
           </svg>
-          Kelola Akses
+          Semua Folder
         </button>
 
-        <button 
-          v-if="currentFolderId"
-          type="button" 
-          class="btn sm primary" 
+        <!-- Unggah Dokumen -->
+        <button
+          type="button"
+          class="btn primary sm"
           @click="openUploadModal"
         >
           + Unggah Dokumen
@@ -542,7 +391,9 @@ function revokePerm(permId: string) {
       </div>
     </div>
 
-    <!-- Tabs: Aktif vs Tempat Sampah -->
+    <!-- ═══════════════════════════════════════════════════════ -->
+    <!-- TABS BAR: AKTIF | TEMPAT SAMPAH                         -->
+    <!-- ═══════════════════════════════════════════════════════ -->
     <div class="tabs px-4">
       <button
         type="button"
@@ -562,136 +413,156 @@ function revokePerm(permId: string) {
       </button>
     </div>
 
-    <!-- STATE 1: DAFTAR FOLDER (Saat di Semua Folder & Tab Aktif) -->
-    <div
-      v-if="!currentFolderId && activeTab === 'aktif'"
-      class="p-2 folder-grid"
-    >
-      <button
-        v-for="f in store.folders"
-        :key="f.id"
-        type="button"
-        class="folder-row"
-        :class="{
-          'folder-disabled': !canAccessFolder(f),
-          'cursor-pointer': canAccessFolder(f)
-        }"
-        :disabled="!canAccessFolder(f)"
-        :title="!canAccessFolder(f) ? `Folder terkunci - Hanya untuk unit ${f.unitId}` : `Buka folder ${f.name}`"
-        @click="selectFolder(f)"
-      >
-        <!-- Icon: Gembok jika disable, Folder jika bisa diakses -->
-        <template v-if="!canAccessFolder(f)">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" class="text-locked shrink-0">
-            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
-            <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
-          </svg>
-        </template>
-        <template v-else>
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" class="text-accent shrink-0">
-            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
-          </svg>
-        </template>
+    <!-- ═══════════════════════════════════════════════════════ -->
+    <!-- VIEW 1: DAFTAR FOLDER (Saat currentFolder === null)     -->
+    <!-- ═══════════════════════════════════════════════════════ -->
+    <div v-if="!currentFolder && activeTab === 'aktif'" class="panel-body p-2">
+      <div v-if="store.loading && store.folders.length === 0" class="empty">
+        <div>Memuat folder...</div>
+      </div>
 
-        <span class="font-medium text-sm flex-1 text-left flex items-center gap-2">
-          <strong>{{ f.name }}</strong>
-          <span class="text-text-muted"> &mdash; {{ f.unitId }}</span>
-          <span v-if="!canAccessFolder(f)" class="pill sm text-[11px]" style="background:var(--locked-soft); color:var(--locked); padding: 1px 7px;">
-            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="inline-block mr-0.5"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
-            Terkunci
-          </span>
-        </span>
-        <span class="count">{{ getDocCountInFolder(f.id) }} dokumen</span>
-      </button>
+      <div v-else-if="store.folders.length === 0" class="empty">
+        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" class="opacity-40 mb-1">
+          <path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2z"/>
+        </svg>
+        <div>Belum ada folder yang dibuat.</div>
+        <button v-if="canAddFolder" class="btn ghost sm mt-2" @click="openAddFolderModal">
+          + Tambah Folder
+        </button>
+      </div>
+
+      <!-- Clean list of folder rows matching screenshot 1 -->
+      <div v-else class="folder-grid">
+        <button
+          v-for="folder in store.folders"
+          :key="folder.id"
+          type="button"
+          class="folder-row"
+          @click="openFolder(folder)"
+        >
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="text-muted flex-shrink-0">
+            <path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2z"/>
+          </svg>
+          <span class="text-sm font-medium">{{ folder.name }} — {{ folder.unit?.name || folder.name }}</span>
+          <span class="count">{{ getFolderDocCount(folder.id) }} dokumen</span>
+        </button>
+      </div>
     </div>
 
-    <!-- STATE 2: TABEL DOKUMEN (Saat berada di dalam Folder atau Tab Tempat Sampah) -->
+    <!-- ═══════════════════════════════════════════════════════ -->
+    <!-- VIEW 2: DAFTAR DOKUMEN (Folder dipilih atau Tab Sampah) -->
+    <!-- ═══════════════════════════════════════════════════════ -->
     <div v-else class="table-scroll">
-      <table>
+      <!-- Loading State -->
+      <div v-if="store.loading" class="empty">
+        <div>Memuat dokumen...</div>
+      </div>
+
+      <!-- Empty State -->
+      <div v-else-if="folderDocs.length === 0" class="empty">
+        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" class="opacity-40 mb-1">
+          <path d="M6 3h8l4 4v14a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/><path d="M14 3v4h4"/>
+        </svg>
+        <div>
+          {{ activeTab === 'aktif'
+            ? (currentFolder ? `Belum ada dokumen di folder "${currentFolder.name}".` : 'Belum ada dokumen aktif.')
+            : (currentFolder ? `Tempat sampah kosong untuk folder "${currentFolder.name}".` : 'Tempat sampah kosong.')
+          }}
+        </div>
+        <button
+          v-if="activeTab === 'aktif'"
+          type="button"
+          class="btn primary sm mt-2"
+          @click="openUploadModal"
+        >
+          + Unggah Dokumen
+        </button>
+      </div>
+
+      <!-- Clean Table matching Screenshot 2 & 3 -->
+      <table v-else>
         <thead>
           <tr>
-            <th style="min-width: 250px">NAMA</th>
+            <th>NAMA</th>
             <th>KATEGORI</th>
-            <th v-if="activeTab === 'trash'">FOLDER</th>
             <th>PEMILIK</th>
             <th>TANGGAL</th>
             <th>UKURAN</th>
             <th>VERSI</th>
             <th>LEVEL ANDA</th>
-            <th style="text-align: right; width: 80px"></th>
+            <th style="text-align: right"></th>
           </tr>
         </thead>
         <tbody>
-          <tr v-if="docsInFolder.length === 0">
-            <td :colspan="activeTab === 'trash' ? 9 : 8">
-              <div class="empty">
-                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/>
-                </svg>
-                <div>{{ activeTab === 'aktif' ? 'Folder ini masih kosong.' : 'Tempat sampah kosong.' }}</div>
-              </div>
-            </td>
-          </tr>
-
           <tr
-            v-for="doc in docsInFolder"
+            v-for="doc in folderDocs"
             :key="doc.id"
             class="clickable"
             @click="openDocDetail(doc)"
           >
-            <!-- 1. NAMA -->
+            <!-- NAMA -->
             <td>
               <div class="docname">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
                   <path d="M6 3h8l4 4v14a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/><path d="M14 3v4h4"/>
                 </svg>
-                <span class="truncate font-semibold hover:underline" :title="doc.name">{{ doc.name }}</span>
+                <span class="truncate" :title="doc.name">{{ doc.name }}</span>
               </div>
             </td>
 
-            <!-- 2. KATEGORI -->
+            <!-- KATEGORI -->
             <td>
-              <span :class="'pill cat-' + doc.category">
-                <span class="dot"></span>{{ doc.category }}
-              </span>
-            </td>
-
-            <!-- (Trash only: FOLDER) -->
-            <td v-if="activeTab === 'trash'" class="muted text-xs">
-              {{ getFolderName(doc.folderId) }}
-            </td>
-
-            <!-- 3. PEMILIK -->
-            <td class="muted text-xs">{{ doc.owner }}</td>
-
-            <!-- 4. TANGGAL -->
-            <td><span class="num muted text-xs">{{ doc.date }}</span></td>
-
-            <!-- 5. UKURAN -->
-            <td><span class="num text-xs">{{ store.fmtSize(doc.size) }}</span></td>
-
-            <!-- 6. VERSI -->
-            <td><span class="num text-xs">v{{ getCurrentVersion(doc)?.v || 1 }}</span></td>
-
-            <!-- 7. LEVEL ANDA -->
-            <td>
-              <span 
+              <span
                 class="pill"
-                :class="{
-                  'pill-kelola': userAccessLevel === 'Kelola',
-                  'pill-edit': userAccessLevel === 'Edit',
-                  'pill-unduh': userAccessLevel === 'Unduh',
-                  'pill-lihat': userAccessLevel === 'Lihat',
+                :style="{
+                  background: getCategoryBadgeColor(getCategoryName(doc)).bg,
+                  color: getCategoryBadgeColor(getCategoryName(doc)).text,
+                  border: '1px solid ' + getCategoryBadgeColor(getCategoryName(doc)).text + '33',
                 }"
               >
-                <span class="dot"></span>{{ userAccessLevel }}
+                <span
+                  class="dot"
+                  :style="{ background: getCategoryBadgeColor(getCategoryName(doc)).dot }"
+                ></span>
+                {{ getCategoryName(doc) }}
               </span>
             </td>
 
-            <!-- 8. AKSI -->
+            <!-- PEMILIK -->
+            <td class="muted text-xs">{{ getOwnerName(doc) }}</td>
+
+            <!-- TANGGAL -->
+            <td><span class="num muted text-xs">{{ doc.date }}</span></td>
+
+            <!-- UKURAN -->
+            <td><span class="num">{{ store.fmtSize(doc.latest_version?.size_bytes || doc.size) }}</span></td>
+
+            <!-- VERSI -->
+            <td><span class="num">v{{ doc.latest_version?.version_number || 1 }}</span></td>
+
+            <!-- LEVEL ANDA -->
+            <td>
+              <span
+                class="pill"
+                :style="{
+                  background: 'transparent',
+                  color: getUserLevel(doc).color,
+                  border: 'none',
+                  padding: '0',
+                }"
+              >
+                <span
+                  class="dot"
+                  :style="{ background: getUserLevel(doc).dot }"
+                ></span>
+                {{ getUserLevel(doc).label }}
+              </span>
+            </td>
+
+            <!-- AKSI -->
             <td style="text-align: right" @click.stop>
               <div class="flex items-center justify-end gap-1">
-                <!-- Active Doc Actions -->
+                <!-- If Active tab -->
                 <template v-if="activeTab === 'aktif'">
                   <button
                     type="button"
@@ -699,44 +570,53 @@ function revokePerm(permId: string) {
                     title="Unduh dokumen"
                     @click="handleDownload(doc)"
                   >
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                       <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
                       <polyline points="7 10 12 15 17 10"></polyline>
                       <line x1="12" y1="15" x2="12" y2="3"></line>
                     </svg>
                   </button>
                   <button
-                    v-if="userAccessLevel === 'Kelola'"
+                    v-if="canModify(doc)"
                     type="button"
                     class="iconbtn"
                     title="Pindahkan ke tempat sampah"
                     @click="handleTrash(doc)"
                   >
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-danger">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                       <polyline points="3 6 5 6 21 6"></polyline>
                       <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
                     </svg>
                   </button>
                 </template>
 
-                <!-- Trashed Doc Actions -->
+                <!-- If Trash tab -->
                 <template v-else>
                   <button
+                    v-if="canModify(doc)"
                     type="button"
-                    class="btn sm"
+                    class="iconbtn"
                     title="Pulihkan dokumen"
                     @click="handleRestore(doc)"
                   >
-                    Pulihkan
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <polyline points="1 4 1 10 7 10"></polyline>
+                      <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path>
+                    </svg>
                   </button>
                   <button
-                    v-if="userAccessLevel === 'Kelola'"
+                    v-if="canModify(doc)"
                     type="button"
-                    class="btn sm danger"
+                    class="iconbtn"
                     title="Hapus permanen"
                     @click="handlePurge(doc)"
                   >
-                    Hapus
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <polyline points="3 6 5 6 21 6"></polyline>
+                      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                      <line x1="10" y1="11" x2="10" y2="17"></line>
+                      <line x1="14" y1="11" x2="14" y2="17"></line>
+                    </svg>
                   </button>
                 </template>
               </div>
@@ -746,36 +626,45 @@ function revokePerm(permId: string) {
       </table>
     </div>
 
-    <!-- Scrim overlay for Drawer -->
-    <div
-      class="scrim"
-      :class="{ open: isDrawerOpen }"
-      @click="closeDrawer"
-    ></div>
-
-    <!-- Detail Drawer -->
-    <div
-      class="drawer"
-      :class="{ open: isDrawerOpen }"
-    >
+    <!-- ═══════════════════════════════════════════════════════ -->
+    <!-- SCRIM & DETAIL DRAWER                                   -->
+    <!-- ═══════════════════════════════════════════════════════ -->
+    <div class="scrim" :class="{ open: isDrawerOpen }" @click="closeDrawer"></div>
+    <div class="drawer" :class="{ open: isDrawerOpen }">
       <template v-if="selectedDoc">
         <div class="drawer-head">
           <div class="flex flex-col gap-1 pr-4">
             <h3 class="font-bold text-sm leading-snug">{{ selectedDoc.name }}</h3>
             <div class="flex items-center gap-2">
-              <span :class="'pill cat-' + selectedDoc.category">
-                <span class="dot"></span>{{ selectedDoc.category }}
+              <span
+                class="pill"
+                :style="{
+                  background: getCategoryBadgeColor(getCategoryName(selectedDoc)).bg,
+                  color: getCategoryBadgeColor(getCategoryName(selectedDoc)).text,
+                  border: '1px solid ' + getCategoryBadgeColor(getCategoryName(selectedDoc)).text + '33',
+                }"
+              >
+                <span
+                  class="dot"
+                  :style="{ background: getCategoryBadgeColor(getCategoryName(selectedDoc)).dot }"
+                ></span>
+                {{ getCategoryName(selectedDoc) }}
               </span>
-              <span class="text-xs text-text-muted">Folder: {{ getFolderName(selectedDoc.folderId) }}</span>
+              <span class="text-xs text-text-muted">
+                Folder: {{ getFolderName(selectedDoc.folderId || selectedDoc.folder_id) }}
+              </span>
             </div>
           </div>
-          <button type="button" class="iconbtn" @click="closeDrawer" title="Tutup">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+          <button class="iconbtn" @click="closeDrawer" title="Tutup">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="18" y1="6" x2="6" y2="18"></line>
+              <line x1="6" y1="6" x2="18" y2="18"></line>
+            </svg>
           </button>
         </div>
 
         <div class="drawer-body">
-          <!-- Metadata Grid -->
+          <!-- Information Grid -->
           <div>
             <div class="section-title">Informasi Dokumen</div>
             <div class="field-grid">
@@ -784,494 +673,288 @@ function revokePerm(permId: string) {
                 <span class="v num">{{ store.fmtSize(selectedDoc.size) }}</span>
               </div>
               <div class="field">
-                <span class="k">Versi Saat Ini</span>
+                <span class="k">Versi Aktif</span>
                 <span class="v num">v{{ getCurrentVersion(selectedDoc)?.v || 1 }}</span>
               </div>
               <div class="field">
                 <span class="k">Pemilik</span>
-                <span class="v">{{ selectedDoc.owner }}</span>
+                <span class="v">{{ getOwnerName(selectedDoc) }}</span>
               </div>
               <div class="field">
-                <span class="k">Terakhir Diubah</span>
+                <span class="k">Tanggal</span>
                 <span class="v num text-xs">{{ selectedDoc.date }}</span>
               </div>
             </div>
-            <div v-if="selectedDoc.tags && selectedDoc.tags.length" class="mt-3">
-              <span class="k" style="font-size: 11px; text-transform: uppercase; color: var(--text-muted); font-weight: 600">Tags</span>
-              <div class="taglist mt-1">
-                <span v-for="tag in selectedDoc.tags" :key="tag" class="tag">#{{ tag }}</span>
-              </div>
+          </div>
+
+          <!-- Tags -->
+          <div v-if="selectedDoc.tags && selectedDoc.tags.length">
+            <div class="section-title">Tags</div>
+            <div class="taglist">
+              <span v-for="tag in selectedDoc.tags" :key="tag.id" class="tag">
+                #{{ typeof tag === 'string' ? tag : tag.name }}
+              </span>
             </div>
           </div>
 
           <!-- Version History -->
           <div>
-            <div class="flex items-center justify-between mb-2">
-              <div class="section-title mb-0">Riwayat Versi ({{ selectedDoc.versions?.length || 1 }})</div>
-              <button
-                v-if="!selectedDoc.deletedAt"
-                type="button"
-                class="btn sm"
-                style="font-size: 11.5px; padding: 3px 8px"
-                @click="openVersionModal"
-              >
-                + Versi Baru
-              </button>
+            <div class="section-title">
+              Riwayat Versi ({{ selectedDoc.versions?.length || 1 }})
             </div>
-
             <div class="flex flex-col">
               <div
-                v-for="(ver, idx) in selectedDoc.versions"
-                :key="ver.v"
+                v-for="(ver, idx) in (selectedDoc.versions || [getCurrentVersion(selectedDoc)])"
+                :key="idx"
                 class="vrow"
-                :class="{ current: idx === selectedDoc.versions.length - 1 }"
+                :class="{ current: idx === (selectedDoc.versions?.length || 1) - 1 }"
               >
-                <div class="vnum">v{{ ver.v }}</div>
+                <div class="vnum">v{{ ver.version_number ?? (ver as any).v ?? 1 }}</div>
                 <div class="flex-1 min-w-0">
                   <div class="flex items-center gap-2">
-                    <span class="font-semibold text-xs">{{ ver.uploader }}</span>
-                    <span class="num text-[11px] text-text-muted">{{ store.fmtSize(ver.size) }}</span>
-                    <span v-if="idx === selectedDoc.versions.length - 1" class="text-[10px] bg-accent-soft text-accent px-1.5 py-0.5 rounded font-bold">
+                    <span class="font-semibold text-xs">{{ ver.uploader?.name ?? (ver as any).uploader ?? 'Admin' }}</span>
+                    <span class="num text-[11px] text-text-muted">{{ store.fmtSize(ver.size_bytes ?? (ver as any).size) }}</span>
+                    <span
+                      v-if="idx === (selectedDoc.versions?.length || 1) - 1"
+                      class="text-[10px] bg-accent-soft text-accent px-1.5 py-0.5 rounded font-bold"
+                    >
                       AKTIF
                     </span>
                   </div>
-                  <div class="text-[11.5px] text-text-muted truncate">{{ ver.note }}</div>
-                  <div class="num text-[10.5px] text-text-muted">{{ ver.date }}</div>
-                </div>
-
-                <!-- Revert Button if not active version -->
-                <button
-                  v-if="idx !== selectedDoc.versions.length - 1 && !selectedDoc.deletedAt"
-                  type="button"
-                  class="btn sm ghost"
-                  style="font-size: 11px; padding: 2px 6px; color: var(--accent)"
-                  title="Jadikan versi aktif"
-                  @click="handleRevertVersion(ver.v)"
-                >
-                  Jadikan aktif
-                </button>
-              </div>
-            </div>
-          </div>
-
-          <!-- Related Activity Log -->
-          <div>
-            <div class="section-title">Aktivitas Terkait Dokumen</div>
-            <div v-if="relatedActivities.length === 0" class="text-xs text-text-muted italic py-1">
-              Belum ada riwayat aktivitas khusus dokumen ini.
-            </div>
-            <div v-else class="flex flex-col">
-              <div
-                v-for="act in relatedActivities"
-                :key="act.id"
-                class="actrow"
-              >
-                <span class="t">{{ act.time }}</span>
-                <div class="flex-1 text-xs">
-                  <strong>{{ act.user }}</strong>: {{ act.action }}
+                  <div v-if="ver.note" class="text-[11.5px] text-text-muted truncate">"{{ ver.note }}"</div>
+                  <code v-if="ver.checksum" class="text-[10px] text-muted block mt-0.5 font-mono">
+                    SHA: {{ ver.checksum.substring(0, 16) }}…
+                  </code>
                 </div>
               </div>
             </div>
           </div>
 
-          <!-- Drawer Action Footer -->
+          <!-- Action Buttons in Drawer -->
           <div class="btnrow pt-3 border-t border-border mt-auto">
-            <button type="button" class="btn primary flex-1 justify-center" @click="handleDownload(selectedDoc)">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+            <button class="btn primary flex-1 justify-center" @click="handleDownload(selectedDoc)">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                <polyline points="7 10 12 15 17 10"></polyline>
+                <line x1="12" y1="15" x2="12" y2="3"></line>
+              </svg>
               Unduh File
             </button>
+
+            <!-- Upload new version button (when active) -->
             <button
-              v-if="!selectedDoc.deletedAt && userAccessLevel === 'Kelola'"
-              type="button"
-              class="btn flex items-center gap-1.5 cursor-pointer"
-              title="Kelola akses dokumen ini"
-              @click="openDocPermModal(selectedDoc)"
+              v-if="!isDocTrashed(selectedDoc)"
+              class="btn ghost sm"
+              @click="openVersionModal(selectedDoc)"
             >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
-                <path d="m9 12 2 2 4-4"/>
-              </svg>
-              Kelola Akses
+              + Versi Baru
             </button>
+
+            <!-- Trash or Restore -->
             <button
-              v-if="!selectedDoc.deletedAt && userAccessLevel === 'Kelola'"
-              type="button"
+              v-if="!isDocTrashed(selectedDoc) && canModify(selectedDoc)"
               class="btn danger"
               @click="handleTrash(selectedDoc)"
-              title="Pindahkan ke tempat sampah"
             >
-              Hapus
+              Pindahkan ke Sampah
             </button>
             <button
-              v-else
-              type="button"
-              class="btn"
+              v-else-if="canModify(selectedDoc)"
+              class="btn ghost"
+              style="color: var(--success); font-weight: 600"
               @click="handleRestore(selectedDoc)"
             >
               Pulihkan
+            </button>
+            <button
+              v-if="isDocTrashed(selectedDoc) && canModify(selectedDoc)"
+              class="btn danger sm"
+              @click="handlePurge(selectedDoc)"
+            >
+              Hapus Permanen
             </button>
           </div>
         </div>
       </template>
     </div>
 
-    <!-- PrimeVue Dialogs -->
-    <!-- Modal: Kelola Akses Folder & Dokumen -->
+    <!-- ═══════════════════════════════════════════════════════ -->
+    <!-- MODAL: TAMBAH FOLDER BARU                               -->
+    <!-- ═══════════════════════════════════════════════════════ -->
     <Dialog
-      v-model:visible="isPermModalOpen"
+      v-model:visible="isAddFolderModalOpen"
+      header="Buat Folder Baru"
       modal
-      :header="`Kelola Akses — ${permTargetType === 'doc' ? selectedPermDoc?.name : (currentFolder?.name || 'Folder')}`"
-      :style="{ width: '560px' }"
+      :style="{ width: '420px' }"
     >
-      <div class="flex flex-col gap-4">
-        <!-- Hint if Doc override -->
-        <p v-if="permTargetType === 'doc'" class="muted text-xs leading-relaxed -mt-1 mb-0">
-          Dokumen ini mewarisi akses folder <strong>{{ getFolderName(selectedPermDoc?.folderId || '') }}</strong>. Pengecualian di tingkat dokumen akan menimpa (*override*) akses folder, khusus untuk dokumen ini.
-        </p>
+      <div class="flex flex-col gap-3 py-2">
+        <label class="formlabel">
+          <span>Nama Folder <span class="text-red-500">*</span></span>
+          <InputText
+            v-model="folderForm.name"
+            placeholder="Contoh: Dokumen Legal 2026"
+            class="w-full"
+            autofocus
+          />
+        </label>
 
-        <!-- Akses Bawaan -->
-        <div>
-          <div class="section-title">Akses Bawaan (Otomatis, Tidak Tersimpan)</div>
-          <ul class="text-xs text-text-muted space-y-1.5 pl-4 list-disc mt-1">
-            <li>
-              Admin &mdash; selalu
-              <span class="pill text-[11px] font-semibold" style="color:var(--danger); background:var(--surface-2)">
-                <span class="dot" style="background:var(--danger)"></span>Kelola
-              </span>
-            </li>
-            <li>
-              Pengelola unit <strong>{{ currentFolder?.unitId || getFolderName(selectedPermDoc?.folderId || '') }}</strong> &mdash;
-              <span class="pill text-[11px] font-semibold" style="color:var(--danger); background:var(--surface-2)">
-                <span class="dot" style="background:var(--danger)"></span>Kelola
-              </span>
-            </li>
-            <li>
-              Pengguna unit <strong>{{ currentFolder?.unitId || getFolderName(selectedPermDoc?.folderId || '') }}</strong> &mdash; default
-              <span class="pill text-[11px] font-semibold" style="color:var(--warning); background:var(--surface-2)">
-                <span class="dot" style="background:var(--warning)"></span>Edit
-              </span>
-            </li>
-          </ul>
-        </div>
-
-        <!-- Pengecualian -->
-        <div>
-          <div class="section-title">
-            Pengecualian {{ permTargetType === 'doc' ? 'Tingkat Dokumen' : '(Individual / Grup)' }}
-          </div>
-          <div v-if="currentPermissions.length === 0" class="empty py-3 border border-border rounded-lg mt-1">
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" class="text-text-muted">
-              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
-            </svg>
-            <div class="text-xs text-text-muted">Belum ada pengecualian izin yang diberikan.</div>
-          </div>
-          <div v-else class="table-scroll border border-border rounded-lg mt-1">
-            <table>
-              <thead>
-                <tr>
-                  <th>Subjek</th>
-                  <th>Level</th>
-                  <th>Diberikan Oleh</th>
-                  <th>Tanggal</th>
-                  <th style="width: 36px"></th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="p in currentPermissions" :key="p.id">
-                  <td class="text-xs">
-                    <strong>{{ getSubjectDisplayName(p) }}</strong>
-                    <span class="muted text-[11px] ml-1">({{ p.subjectType === 'user' ? 'Pengguna' : 'Grup' }})</span>
-                  </td>
-                  <td>
-                    <span
-                      class="pill text-[11px]"
-                      :style="{
-                        background: 'var(--surface-2)',
-                        color: p.level === 'manage' ? 'var(--danger)' : p.level === 'edit' ? 'var(--warning)' : 'var(--accent)'
-                      }"
-                    >
-                      <span
-                        class="dot"
-                        :style="{
-                          background: p.level === 'manage' ? 'var(--danger)' : p.level === 'edit' ? 'var(--warning)' : 'var(--accent)'
-                        }"
-                      ></span>
-                      {{ p.level === 'manage' ? 'Kelola' : p.level === 'edit' ? 'Edit' : 'Lihat' }}
-                    </span>
-                  </td>
-                  <td class="muted text-xs">{{ getGranterName(p.grantedBy) }}</td>
-                  <td class="num muted text-xs">{{ p.grantedAt || '-' }}</td>
-                  <td>
-                    <button type="button" class="iconbtn sm" style="width:24px; height:24px" title="Cabut akses" @click.stop="revokePerm(p.id)">
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
-                    </button>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        <!-- Tambah Pengecualian -->
-        <div>
-          <div class="section-title">Tambah Pengecualian</div>
-          <div class="grid grid-cols-2 gap-3 mt-1.5">
-            <div class="flex flex-col gap-1.5">
-              <label class="text-xs font-semibold" style="color: var(--text-muted)">Tipe Subjek</label>
-              <Select 
-                v-model="permForm.subjectType" 
-                :options="[
-                  { label: 'Pengguna (Individual)', value: 'user' },
-                  { label: 'Grup', value: 'group' }
-                ]" 
-                optionLabel="label" 
-                optionValue="value" 
-                fluid 
-                size="small"
-                @change="onSubjectTypeChange"
-              />
-            </div>
-
-            <div class="flex flex-col gap-1.5">
-              <label class="text-xs font-semibold" style="color: var(--text-muted)">
-                Pilih {{ permForm.subjectType === 'user' ? 'Pengguna' : 'Grup' }}
-              </label>
-              <Select 
-                v-model="permForm.subjectId" 
-                :options="subjectOptions" 
-                optionLabel="label" 
-                optionValue="id" 
-                fluid 
-                size="small"
-              />
-            </div>
-          </div>
-
-          <div class="flex flex-col gap-1.5 mt-3">
-            <label class="text-xs font-semibold" style="color: var(--text-muted)">Level Akses</label>
-            <Select 
-              v-model="permForm.level" 
-              :options="permForm.subjectType === 'group' ? [
-                { label: 'Lihat (Hanya Baca)', value: 'view' },
-                { label: 'Edit (Unggah & Perbarui Dokumen)', value: 'edit' },
-                { label: 'Kelola (Akses Penuh)', value: 'manage' }
-              ] : [
-                { label: 'Lihat (Hanya Baca)', value: 'view' },
-                { label: 'Edit (Unggah & Perbarui Dokumen)', value: 'edit' }
-              ]" 
-              optionLabel="label" 
-              optionValue="value" 
-              fluid 
-              size="small"
-            />
-          </div>
-
-          <p class="muted text-[11.5px] mt-2 mb-0 leading-relaxed">
-            Pemberian akses ke Pengguna individual dibatasi maksimal "Edit" (tidak bisa "Kelola"); sebaliknya grup bisa diberi akses sampai "Kelola".
-          </p>
+        <label v-if="authStore.isAdmin" class="formlabel">
+          <span>Unit Organisasi <span class="text-red-500">*</span></span>
+          <Select
+            v-model="folderForm.unit_id"
+            :options="store.units"
+            optionLabel="name"
+            optionValue="id"
+            placeholder="Pilih Unit"
+            class="w-full"
+          />
+        </label>
+        <div v-else class="text-xs text-muted">
+          Folder otomatis ditautkan ke unit kerja akun Anda.
         </div>
       </div>
 
       <template #footer>
-        <Button label="Tutup" severity="secondary" text @click="isPermModalOpen = false" />
-        <Button label="Berikan Akses" @click="submitGrantPermission">
-          <template #icon>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mr-1">
-              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
-              <path d="m9 12 2 2 4-4"/>
-            </svg>
-          </template>
-        </Button>
-      </template>
-    </Dialog>
-
-    <!-- PrimeVue Dialog: Unggah Dokumen Baru -->
-    <Dialog
-      v-model:visible="isUploadModalOpen"
-      modal
-      header="Unggah Dokumen Baru"
-      :style="{ width: '480px' }"
-    >
-      <div class="flex flex-col gap-3.5">
-        <div class="flex flex-col gap-1.5">
-          <label class="text-xs font-semibold" style="color: var(--text-muted)">Nama Dokumen</label>
-          <InputText v-model="newDoc.name" placeholder="Contoh: Surat Keputusan Direksi No 12" fluid />
-        </div>
-
-        <div class="grid grid-cols-2 gap-3">
-          <div class="flex flex-col gap-1.5">
-            <label class="text-xs font-semibold" style="color: var(--text-muted)">Folder</label>
-            <Select 
-              v-model="newDoc.folderId" 
-              :options="store.folders" 
-              optionLabel="name" 
-              optionValue="id" 
-              fluid 
-              size="small"
-            />
-          </div>
-          <div class="flex flex-col gap-1.5">
-            <label class="text-xs font-semibold" style="color: var(--text-muted)">Kategori</label>
-            <Select 
-              v-model="newDoc.category" 
-              :options="availableCategoryNames" 
-              fluid 
-              size="small"
-            />
-          </div>
-        </div>
-
-        <div class="flex flex-col gap-1.5">
-          <label class="text-xs font-semibold" style="color: var(--text-muted)">Tags (pisahkan koma)</label>
-          <InputText v-model="newDoc.tags" placeholder="sk, direksi, internal" fluid />
-        </div>
-
-        <div class="flex flex-col gap-1.5">
-          <label class="text-xs font-semibold" style="color: var(--text-muted)">Catatan Unggahan</label>
-          <Textarea v-model="newDoc.note" placeholder="Catatan versi awal dokumen..." rows="3" fluid autoResize />
-        </div>
-      </div>
-
-      <template #footer>
-        <Button label="Batal" severity="secondary" text @click="isUploadModalOpen = false" />
-        <Button label="Simpan & Unggah" @click="submitUploadDoc" />
-      </template>
-    </Dialog>
-
-    <!-- PrimeVue Dialog: Unggah Versi Baru -->
-    <Dialog
-      v-model:visible="isVersionModalOpen"
-      modal
-      header="Unggah Versi Baru"
-      :style="{ width: '460px' }"
-    >
-      <div class="flex flex-col gap-3">
-        <p class="text-xs text-[var(--text-muted)] -mt-1 mb-0">{{ selectedDoc?.name }}</p>
-
-        <div class="flex flex-col gap-1.5">
-          <label class="text-xs font-semibold" style="color: var(--text-muted)">Catatan Perubahan (Changelog)</label>
-          <Textarea v-model="newVersion.note" placeholder="Jelaskan perubahan pada versi ini..." rows="3" fluid autoResize />
-        </div>
-
-        <div class="text-xs text-[var(--text-muted)]">
-          Versi berikutnya akan otomatis ditetapkan sebagai <strong>v{{ (selectedDoc?.versions?.length || 0) + 1 }}</strong> dan menjadi versi aktif.
-        </div>
-      </div>
-
-      <template #footer>
-        <Button label="Batal" severity="secondary" text @click="isVersionModalOpen = false" />
-        <Button label="Unggah Versi Baru" @click="submitUploadVersion" />
-      </template>
-    </Dialog>
-
-    <!-- PrimeVue Dialog: Tambah Folder Baru -->
-    <Dialog
-      v-model:visible="isFolderModalOpen"
-      modal
-      header="Tambah Folder Baru"
-      :style="{ width: '440px' }"
-    >
-      <div class="flex flex-col gap-3.5">
-        <div class="flex flex-col gap-1.5">
-          <label class="text-xs font-semibold" style="color: var(--text-muted)">Nama Folder</label>
-          <InputText v-model="newFolder.name" placeholder="Contoh: Operasional & Logistik" fluid />
-        </div>
-
-        <div class="flex flex-col gap-1.5">
-          <label class="text-xs font-semibold" style="color: var(--text-muted)">Unit Terkait</label>
-          <Select 
-            v-model="newFolder.unitId" 
-            :options="availableUnitNames" 
-            fluid 
+        <div class="flex justify-end gap-2">
+          <Button label="Batal" text size="small" @click="isAddFolderModalOpen = false" />
+          <Button
+            label="Simpan Folder"
+            icon="pi pi-check"
             size="small"
+            :loading="folderSubmitting"
+            @click="submitAddFolder"
           />
         </div>
-
-        <div class="flex items-center gap-2 cursor-pointer pt-1" @click="newFolder.restricted = !newFolder.restricted">
-          <Checkbox v-model="newFolder.restricted" :binary="true" />
-          <span class="text-xs font-semibold text-[var(--text)]">Folder Akses Terbatas (Restricted)</span>
-        </div>
-      </div>
-
-      <template #footer>
-        <Button label="Batal" severity="secondary" text @click="isFolderModalOpen = false" />
-        <Button label="Buat Folder" @click="submitAddFolder" />
       </template>
     </Dialog>
 
+    <!-- ═══════════════════════════════════════════════════════ -->
+    <!-- MODAL: UNGGAH DOKUMEN BARU                              -->
+    <!-- ═══════════════════════════════════════════════════════ -->
+    <Dialog
+      v-model:visible="isUploadModalOpen"
+      header="Unggah Dokumen Baru"
+      modal
+      :style="{ width: '480px' }"
+    >
+      <div class="flex flex-col gap-3 py-2">
+        <label class="formlabel">
+          <span>Nama Dokumen <span class="text-red-500">*</span></span>
+          <InputText v-model="newDoc.name" placeholder="Contoh: Kontrak Sewa Gedung 2026" class="w-full" />
+        </label>
+
+        <label class="formlabel">
+          <span>Folder <span class="text-red-500">*</span></span>
+          <Select
+            v-model="newDoc.folder_id"
+            :options="store.folders"
+            optionLabel="name"
+            optionValue="id"
+            placeholder="Pilih Folder"
+            class="w-full"
+          />
+        </label>
+
+        <label class="formlabel">
+          <span>Kategori <span class="text-red-500">*</span></span>
+          <Select
+            v-model="newDoc.category_id"
+            :options="store.categories"
+            optionLabel="name"
+            optionValue="id"
+            placeholder="Pilih Kategori"
+            class="w-full"
+          />
+        </label>
+
+        <label class="formlabel">
+          <span>Tags (pisahkan dengan koma)</span>
+          <InputText v-model="newDoc.tags" placeholder="kontrak, sewa, gedung" class="w-full" />
+        </label>
+
+        <label class="formlabel">
+          <span>Pilih File Dokumen</span>
+          <input
+            type="file"
+            accept=".pdf,.docx,.xlsx,.doc,.xls,.png,.jpg,.jpeg"
+            class="w-full p-2 border border-border rounded text-sm bg-surface-2"
+            @change="handleFileChange"
+          />
+        </label>
+
+        <label class="formlabel">
+          <span>Catatan Versi Awal</span>
+          <Textarea v-model="newDoc.note" rows="2" placeholder="Catatan versi awal (opsional)..." class="w-full" />
+        </label>
+      </div>
+
+      <template #footer>
+        <div class="flex justify-end gap-2">
+          <Button label="Batal" text size="small" @click="isUploadModalOpen = false" />
+          <Button
+            label="Unggah"
+            icon="pi pi-upload"
+            size="small"
+            :loading="submitting"
+            @click="submitUploadDoc"
+          />
+        </div>
+      </template>
+    </Dialog>
+
+    <!-- ═══════════════════════════════════════════════════════ -->
+    <!-- MODAL: UPLOAD VERSI BARU DOKUMEN                        -->
+    <!-- ═══════════════════════════════════════════════════════ -->
+    <Dialog
+      v-model:visible="isVersionModalOpen"
+      header="Unggah Versi Baru"
+      modal
+      :style="{ width: '440px' }"
+    >
+      <div class="flex flex-col gap-3 py-2">
+        <div class="p-2.5 rounded bg-surface-2 border border-border text-xs">
+          Dokumen: <strong>{{ selectedDoc?.name }}</strong>
+        </div>
+
+        <label class="formlabel">
+          <span>Pilih File Versi Baru <span class="text-red-500">*</span></span>
+          <input
+            type="file"
+            accept=".pdf,.docx,.xlsx,.doc,.xls,.png,.jpg,.jpeg"
+            class="w-full p-2 border border-border rounded text-sm bg-surface-2"
+            @change="handleVersionFileChange"
+          />
+        </label>
+
+        <label class="formlabel">
+          <span>Catatan Perubahan</span>
+          <Textarea
+            v-model="versionNote"
+            rows="2"
+            placeholder="Contoh: Revisi pasal 4 mengenai masa sewa"
+            class="w-full"
+          />
+        </label>
+      </div>
+
+      <template #footer>
+        <div class="flex justify-end gap-2">
+          <Button label="Batal" text size="small" @click="isVersionModalOpen = false" />
+          <Button
+            label="Upload Versi"
+            icon="pi pi-check"
+            size="small"
+            :loading="submitting"
+            @click="submitUploadVersion"
+          />
+        </div>
+      </template>
+    </Dialog>
   </div>
 </template>
 
 <style scoped>
-.folder-grid {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 8px;
-}
-.folder-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  width: 100%;
-  text-align: left;
-  padding: 10px 14px;
-  border-radius: 8px;
-  border: 1px solid transparent;
-  background: none;
-  color: var(--text);
-  font-weight: 500;
-  cursor: pointer;
-  transition: background-color 0.15s ease;
-}
-.folder-row:hover {
-  background: var(--surface-2);
-}
-.folder-row .count {
-  margin-left: auto;
-  font-size: 12px;
-  color: var(--text-muted);
-  font-variant-numeric: tabular-nums;
-}
-
-.folder-row.folder-disabled {
-  opacity: 0.55;
-  cursor: not-allowed !important;
-}
-.folder-row.folder-disabled:hover {
-  background: transparent !important;
-}
-
-/* Level Anda Pills */
-.pill-kelola {
-  background: var(--danger-soft);
-  color: var(--danger);
-}
-.pill-kelola .dot {
-  background: var(--danger);
-}
-
-.pill-edit {
-  background: var(--warning-soft);
-  color: var(--warning);
-}
-.pill-edit .dot {
-  background: var(--warning);
-}
-
-.pill-unduh {
-  background: var(--accent-soft);
-  color: var(--accent);
-}
-.pill-unduh .dot {
-  background: var(--accent);
-}
-
-.pill-lihat {
-  background: var(--surface-2);
-  color: var(--text-muted);
-}
-.pill-lihat .dot {
-  background: var(--text-muted);
+.panel {
+  padding: 0;
 }
 </style>
