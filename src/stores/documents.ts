@@ -1,33 +1,72 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
+import api from '../services/api'
 import { useAuthStore } from './auth'
 
+// ─── Types ───
+export type DocTag = {
+  id: string
+  name: string
+}
+
 export type DocVersion = {
-  v: number
-  date: string
-  uploader: string
-  size: number
-  note: string
+  id: string
+  document_id: string
+  version_number: number
+  file_url: string
+  checksum: string
+  size_bytes: number
+  note: string | null
+  uploaded_by: string | null
+  uploader?: { id: string; name: string }
+  created_at: string
+  // Legacy / prototype compatibility:
+  v?: number
+  size?: number
+  date?: string
 }
 
 export type Doc = {
   id: string
   name: string
-  folderId: string
-  category: string
-  owner: string
-  date: string
-  size: number
-  tags: string[]
-  versions: DocVersion[]
-  deletedAt: string | null
+  folder_id: string
+  category_id: string
+  owner_id: string
+  status: string
+  deleted_at: string | null
+  created_at: string
+  folder?: { id: string; name: string }
+  category?: { id: string; name: string }
+  owner?: { id: string; name: string }
+  categoryName?: string
+  ownerName?: string
+  tags?: DocTag[]
+  latest_version?: DocVersion
+  versions?: DocVersion[]
+  // Legacy / prototype compatibility:
+  folderId?: string
+  date?: string
+  size?: number
+  deletedAt?: string | null
 }
 
 export type Folder = {
   id: string
   name: string
-  unitId: string
+  unit_id?: string
+  unitId?: string
+  unit?: { id: string; name: string }
   restricted?: boolean
+}
+
+export type Category = {
+  id: string
+  name: string
+}
+
+export type Unit = {
+  id: string
+  name: string
 }
 
 export type Audit = {
@@ -39,253 +78,32 @@ export type Audit = {
   time: string
 }
 
-export type FolderPermission = {
-  id: string
-  folderId: string
-  subjectType: 'user' | 'group'
-  subjectId: string
-  subjectName: string
-  level: 'view' | 'edit' | 'manage'
-  grantedBy: string
-  grantedAt: string
-}
-
-export const initialFolderPermissions: FolderPermission[] = [
-  { id: 'fp1', folderId: 'f4', subjectType: 'user', subjectId: 'u5', subjectName: 'Anas (unit Keuangan)', level: 'view', grantedBy: 'Fadhil Maulana', grantedAt: '15 Sep 2026' },
-  { id: 'fp2', folderId: 'f4', subjectType: 'group', subjectId: 'g2', subjectName: 'Tim Pengadaan Gabungan', level: 'view', grantedBy: 'Fadhil Maulana', grantedAt: '1 Okt 2026' },
-]
-
-export const initialFolders: Folder[] = [
-  { id: 'f1', name: 'Kontrak', unitId: 'Kontrak', restricted: false },
-  { id: 'f2', name: 'Keuangan', unitId: 'Keuangan', restricted: false },
-  { id: 'f3', name: 'SDM', unitId: 'SDM', restricted: false },
-  { id: 'f4', name: 'Legal', unitId: 'Legal', restricted: true },
-  { id: 'f5', name: 'Korespondensi', unitId: 'Korespondensi', restricted: false },
-]
-
-export const initialDocuments: Doc[] = [
-  {
-    id: 'd1',
-    name: 'Kontrak Sewa Gedung Cikarang 2026',
-    folderId: 'f1',
-    category: 'Kontrak',
-    owner: 'Taufik Nugraha',
-    date: '15 Jan 2026',
-    size: 2450,
-    tags: ['sewa', 'gedung'],
-    versions: [
-      { v: 1, date: '15 Jan 2026', uploader: 'Taufik Nugraha', size: 2450, note: 'Unggahan awal' }
-    ],
-    deletedAt: null
-  },
-  {
-    id: 'd2',
-    name: 'Perjanjian Kerja Sama Vendor Scanning',
-    folderId: 'f1',
-    category: 'Kontrak',
-    owner: 'Dewi Larasati',
-    date: '2 Nov 2025',
-    size: 1120,
-    tags: ['vendor', 'scanning'],
-    versions: [
-      { v: 1, date: '2 Nov 2025', uploader: 'Dewi Larasati', size: 1120, note: 'Unggahan awal' }
-    ],
-    deletedAt: null
-  },
-  {
-    id: 'd3',
-    name: 'Addendum Kontrak Pemasok ATK',
-    folderId: 'f1',
-    category: 'Kontrak',
-    owner: 'Dewi Larasati',
-    date: '20 Feb 2026',
-    size: 612,
-    tags: ['atk'],
-    versions: [
-      { v: 1, date: '20 Feb 2026', uploader: 'Dewi Larasati', size: 612, note: 'Unggahan awal' }
-    ],
-    deletedAt: null
-  },
-  {
-    id: 'd4',
-    name: 'Laporan Keuangan Kuartal I 2026',
-    folderId: 'f2',
-    category: 'Keuangan',
-    owner: 'Anas',
-    date: '5 Apr 2026',
-    size: 3870,
-    tags: ['laporan', 'kuartal'],
-    versions: [
-      { v: 1, date: '2 Apr 2026', uploader: 'Anas', size: 3600, note: 'Unggahan awal' },
-      { v: 2, date: '4 Apr 2026', uploader: 'Anas', size: 3750, note: 'Revisi angka pajak' },
-      { v: 3, date: '5 Apr 2026', uploader: 'Anas', size: 3870, note: 'Perbaikan format tabel' }
-    ],
-    deletedAt: null
-  },
-  {
-    id: 'd5',
-    name: 'Invoice Vendor Fumigasi Maret 2026',
-    folderId: 'f2',
-    category: 'Keuangan',
-    owner: 'Anas',
-    date: '10 Mar 2026',
-    size: 412,
-    tags: ['invoice'],
-    versions: [
-      { v: 1, date: '10 Mar 2026', uploader: 'Anas', size: 412, note: 'Unggahan awal' }
-    ],
-    deletedAt: null
-  },
-  {
-    id: 'd6',
-    name: 'Rekonsiliasi Bank Februari 2026',
-    folderId: 'f2',
-    category: 'Keuangan',
-    owner: 'Nurhasan',
-    date: '1 Mar 2026',
-    size: 890,
-    tags: ['rekonsiliasi'],
-    versions: [
-      { v: 1, date: '1 Mar 2026', uploader: 'Nurhasan', size: 890, note: 'Unggahan awal' }
-    ],
-    deletedAt: null
-  },
-  {
-    id: 'd7',
-    name: 'SK Pengangkatan Karyawan Batch 12',
-    folderId: 'f3',
-    category: 'SDM',
-    owner: 'Clara Hutagalung',
-    date: '8 Jan 2026',
-    size: 1540,
-    tags: ['sk', 'karyawan'],
-    versions: [
-      { v: 1, date: '8 Jan 2026', uploader: 'Clara Hutagalung', size: 1540, note: 'Unggahan awal' }
-    ],
-    deletedAt: null
-  },
-  {
-    id: 'd8',
-    name: 'Data Cuti Tahunan 2026',
-    folderId: 'f3',
-    category: 'SDM',
-    owner: 'Clara Hutagalung',
-    date: '14 Feb 2026',
-    size: 305,
-    tags: ['cuti'],
-    versions: [
-      { v: 1, date: '14 Feb 2026', uploader: 'Clara Hutagalung', size: 305, note: 'Unggahan awal' }
-    ],
-    deletedAt: null
-  },
-  {
-    id: 'd9',
-    name: 'Notulen Rapat Evaluasi Kinerja Q1',
-    folderId: 'f3',
-    category: 'SDM',
-    owner: 'Anas',
-    date: '12 Apr 2026',
-    size: 480,
-    tags: ['notulen', 'kinerja'],
-    versions: [
-      { v: 1, date: '12 Apr 2026', uploader: 'Anas', size: 480, note: 'Unggahan awal' }
-    ],
-    deletedAt: null
-  },
-  {
-    id: 'd10',
-    name: 'Somasi Sengketa Lahan Bekasi',
-    folderId: 'f4',
-    category: 'Legal',
-    owner: 'Taufik Nugraha',
-    date: '1 Des 2025',
-    size: 2130,
-    tags: ['somasi', 'sengketa'],
-    versions: [
-      { v: 1, date: '1 Des 2025', uploader: 'Taufik Nugraha', size: 2130, note: 'Unggahan awal' }
-    ],
-    deletedAt: null
-  },
-  {
-    id: 'd11',
-    name: 'Opini Hukum Akuisisi Anak Usaha',
-    folderId: 'f4',
-    category: 'Legal',
-    owner: 'Taufik Nugraha',
-    date: '22 Mar 2026',
-    size: 4230,
-    tags: ['opini-hukum'],
-    versions: [
-      { v: 1, date: '20 Mar 2026', uploader: 'Taufik Nugraha', size: 4000, note: 'Unggahan awal' },
-      { v: 2, date: '22 Mar 2026', uploader: 'Taufik Nugraha', size: 4230, note: 'Tambahan lampiran due diligence' }
-    ],
-    deletedAt: null
-  },
-  {
-    id: 'd12',
-    name: 'Surat Masuk Dinas Perpustakaan Kearsipan',
-    folderId: 'f5',
-    category: 'Korespondensi',
-    owner: 'Nurhasan',
-    date: '28 Feb 2026',
-    size: 210,
-    tags: ['surat-masuk'],
-    versions: [
-      { v: 1, date: '28 Feb 2026', uploader: 'Nurhasan', size: 210, note: 'Unggahan awal' }
-    ],
-    deletedAt: null
-  },
-  {
-    id: 'd13',
-    name: 'Surat Keluar Konfirmasi Audit ANRI',
-    folderId: 'f5',
-    category: 'Korespondensi',
-    owner: 'Nurhasan',
-    date: '15 Mar 2026',
-    size: 260,
-    tags: ['surat-keluar', 'audit'],
-    versions: [
-      { v: 1, date: '15 Mar 2026', uploader: 'Nurhasan', size: 260, note: 'Unggahan awal' }
-    ],
-    deletedAt: null
-  },
-  {
-    id: 'd14',
-    name: 'Draft Lama Kontrak Vendor (dibatalkan)',
-    folderId: 'f1',
-    category: 'Kontrak',
-    owner: 'Dewi Larasati',
-    date: '3 Okt 2025',
-    size: 540,
-    tags: ['draft'],
-    versions: [
-      { v: 1, date: '3 Okt 2025', uploader: 'Dewi Larasati', size: 540, note: 'Unggahan awal' }
-    ],
-    deletedAt: '18 Sep 2026'
-  }
-]
+const AUDIT_KEY = 'doksli-persistent-audit'
 
 export const initialAuditLog: Audit[] = [
   { id: 'a1', user: 'Clara Hutagalung', action: 'Lihat dokumen', object: 'Data Cuti Tahunan 2026', ip: '10.20.4.18', time: '21 Sep 2026, 08:01' },
   { id: 'a2', user: 'Nurhasan', action: 'Unduh dokumen', object: 'Surat Keluar Konfirmasi Audit ANRI', ip: '10.20.4.44', time: '21 Sep 2026, 07:35' },
-  { id: 'a3', user: 'Fadhil Maulana', action: 'Masuk ke sistem', object: '—', ip: '10.20.4.11', time: '21 Sep 2026, 07:12' },
+  { id: 'a3', user: 'Admin', action: 'Masuk ke sistem', object: '—', ip: '10.20.4.11', time: '21 Sep 2026, 07:12' },
   { id: 'a4', user: 'Dewi Larasati', action: 'Pindahkan ke tempat sampah', object: 'Draft Lama Kontrak Vendor (dibatalkan)', ip: '10.20.4.22', time: '18 Sep 2026, 11:03' },
   { id: 'a5', user: 'Taufik Nugraha', action: 'Lihat dokumen', object: 'Somasi Sengketa Lahan Bekasi', ip: '10.20.4.15', time: '20 Sep 2026, 15:12' },
   { id: 'a6', user: 'Anas', action: 'Unggah versi baru', object: 'Laporan Keuangan Kuartal I 2026 v3', ip: '10.20.4.30', time: '20 Sep 2026, 14:47' },
   { id: 'a7', user: 'Anas', action: 'Unggah versi baru', object: 'Laporan Keuangan Kuartal I 2026 v2', ip: '10.20.4.30', time: '20 Sep 2026, 10:22' },
   { id: 'a8', user: 'Anas', action: 'Lihat dokumen', object: 'Laporan Keuangan Kuartal I 2026', ip: '10.20.4.30', time: '20 Sep 2026, 10:05' },
   { id: 'a9', user: 'Dewi Larasati', action: 'Unggah dokumen', object: 'Perjanjian Kerja Sama Vendor Scanning', ip: '10.20.4.22', time: '20 Sep 2026, 09:41' },
-  { id: 'a10', user: 'Fadhil Maulana', action: 'Unggah dokumen', object: 'Kontrak Sewa Gedung Cikarang 2026', ip: '10.20.4.11', time: '20 Sep 2026, 08:14' },
-  { id: 'a11', user: 'Fadhil Maulana', action: 'Masuk ke sistem', object: '—', ip: '10.20.4.11', time: '20 Sep 2026, 08:02' },
+  { id: 'a10', user: 'Admin', action: 'Unggah dokumen', object: 'Kontrak Sewa Gedung Kantor Pusat 2026', ip: '10.20.4.11', time: '20 Sep 2026, 08:14' },
 ]
 
-const DOCS_KEY = 'doksli-persistent-docs'
-const FOLDERS_KEY = 'doksli-persistent-folders'
-const AUDIT_KEY = 'doksli-persistent-audit'
-const PERMS_KEY = 'doksli-persistent-folder-perms'
-
+// ─── Store ───
 export const useDocumentsStore = defineStore('documents', () => {
   const authStore = useAuthStore()
+
+  const documents = ref<Doc[]>([])
+  const folders = ref<Folder[]>([])
+  const categories = ref<Category[]>([])
+  const units = ref<Unit[]>([])
+  const loading = ref(false)
+  const error = ref<string | null>(null)
+  const meta = ref<{ current_page: number; last_page: number; total: number } | null>(null)
 
   function loadStored<T>(key: string, fallback: T): T {
     try {
@@ -294,26 +112,16 @@ export const useDocumentsStore = defineStore('documents', () => {
         const parsed = JSON.parse(s)
         if (Array.isArray(parsed) && parsed.length > 0) return parsed as T
       }
-    } catch {
-      // fallback
-    }
+    } catch {}
     return fallback
   }
 
-  const folders = ref<Folder[]>(loadStored<Folder[]>(FOLDERS_KEY, initialFolders))
-  const documents = ref<Doc[]>(loadStored<Doc[]>(DOCS_KEY, initialDocuments))
   const auditLog = ref<Audit[]>(loadStored<Audit[]>(AUDIT_KEY, initialAuditLog))
-  const folderPermissions = ref<FolderPermission[]>(loadStored<FolderPermission[]>(PERMS_KEY, initialFolderPermissions))
 
-  function persist() {
+  function persistAudit() {
     try {
-      localStorage.setItem(FOLDERS_KEY, JSON.stringify(folders.value))
-      localStorage.setItem(DOCS_KEY, JSON.stringify(documents.value))
       localStorage.setItem(AUDIT_KEY, JSON.stringify(auditLog.value))
-      localStorage.setItem(PERMS_KEY, JSON.stringify(folderPermissions.value))
-    } catch {
-      // ignore
-    }
+    } catch {}
   }
 
   function todayStr(): string {
@@ -331,227 +139,229 @@ export const useDocumentsStore = defineStore('documents', () => {
   }
 
   function logAudit(action: string, object: string) {
-    const userName = authStore.user?.name || 'Fadhil Maulana'
+    const userName = authStore.user?.name || 'Admin'
     const newEntry: Audit = {
       id: 'a' + Date.now(),
       user: userName,
       action,
       object,
-      ip: '10.20.4.11',
+      ip: '127.0.0.1',
       time: nowTimeStr(),
     }
     auditLog.value.unshift(newEntry)
-    persist()
+    persistAudit()
   }
 
-  const activeDocs = computed(() => documents.value.filter(d => !d.deletedAt))
-  const trashedDocs = computed(() => documents.value.filter(d => !!d.deletedAt))
-  const totalKB = computed(() => activeDocs.value.reduce((acc, d) => acc + d.size, 0))
+  // ── Computed ──
+  const activeDocs = computed(() => documents.value.filter(d => !d.deleted_at && d.status !== 'trashed'))
+  const trashedDocs = computed(() => documents.value.filter(d => !!d.deleted_at || d.status === 'trashed'))
+
+  const totalKB = computed(() => {
+    return activeDocs.value.reduce((acc, d) => {
+      const size = d.latest_version?.size_bytes || d.size || 0
+      return acc + size
+    }, 0)
+  })
+
   const todayCount = computed(() => {
     const today = todayStr()
     return auditLog.value.filter(a => a.time.startsWith(today)).length
   })
+
   const recentActivities = computed(() => auditLog.value.slice(0, 6))
 
-  function fmtSize(kb: number): string {
-    return kb >= 1024 ? (kb / 1024).toFixed(1) + ' MB' : Math.round(kb) + ' KB'
-  }
+  // ── Normalize document for compatibility ──
+  function normalizeDoc(raw: any): Doc {
+    const catName = typeof raw.category === 'object' && raw.category !== null
+      ? (raw.category.name ?? '')
+      : String(raw.category ?? raw.category_id ?? '')
 
-  function addFolder(name: string, unitId: string, restricted: boolean = false): Folder {
-    const id = 'f' + (folders.value.length + 1)
-    const newFolder: Folder = { id, name, unitId, restricted }
-    folders.value.push(newFolder)
-    logAudit('Membuat folder baru', `${name} (${unitId})`)
-    persist()
-    return newFolder
-  }
+    const ownerName = typeof raw.owner === 'object' && raw.owner !== null
+      ? (raw.owner.name ?? '')
+      : String(raw.owner ?? raw.owner_id ?? '')
 
-  function uploadDocument(payload: {
-    name: string
-    folderId: string
-    category: string
-    tags: string[]
-    note?: string
-    size?: number
-  }): Doc {
-    const currentUser = authStore.user?.name || 'Fadhil Maulana'
-    const size = payload.size || (150 + Math.round(Math.random() * 3200))
-    const date = todayStr()
-    const id = 'd' + (documents.value.length + 1)
-    const newDoc: Doc = {
-      id,
-      name: payload.name,
-      folderId: payload.folderId,
-      category: payload.category,
-      owner: currentUser,
-      date,
-      size,
-      tags: payload.tags,
-      versions: [
-        {
-          v: 1,
-          date,
-          uploader: currentUser,
-          size,
-          note: payload.note || 'Unggahan awal',
-        }
-      ],
-      deletedAt: null,
+    const tagsArr: DocTag[] = Array.isArray(raw.tags)
+      ? raw.tags.map((t: any) => (typeof t === 'string' ? { id: t, name: t } : t))
+      : []
+
+    return {
+      ...raw,
+      folderId: raw.folder_id ?? raw.folderId,
+      category: typeof raw.category === 'object' && raw.category ? raw.category : { id: raw.category_id || '', name: catName },
+      owner: typeof raw.owner === 'object' && raw.owner ? raw.owner : { id: raw.owner_id || '', name: ownerName },
+      categoryName: catName,
+      ownerName: ownerName,
+      tags: tagsArr,
+      date: raw.created_at ? new Date(raw.created_at).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' }) : todayStr(),
+      size: raw.latest_version?.size_bytes ?? 0,
+      deletedAt: raw.deleted_at ?? (raw.status === 'trashed' ? 'trashed' : null),
     }
-    documents.value.unshift(newDoc)
-    logAudit('Unggah dokumen', newDoc.name)
-    persist()
-    return newDoc
   }
 
-  function uploadVersion(docId: string, note: string, size?: number) {
-    const doc = documents.value.find(d => d.id === docId)
-    if (!doc) return
-    const currentUser = authStore.user?.name || 'Fadhil Maulana'
-    const lastV = doc.versions[doc.versions.length - 1]
-    const nextV = (lastV?.v || 0) + 1
-    const newSize = size || Math.max(80, (lastV?.size || 500) + Math.round((Math.random() - 0.3) * 400))
-    const date = todayStr()
+  // ── Fetch documents ──
+  async function fetchDocuments(params?: Record<string, string>) {
+    loading.value = true
+    error.value = null
+    try {
+      const { data } = await api.get('/v1/documents', { params })
+      const list = (data.data ?? []).map(normalizeDoc)
+      documents.value = list
+      meta.value = data.meta ?? null
+    } catch (e: any) {
+      error.value = e.response?.data?.message ?? 'Gagal memuat dokumen'
+    } finally {
+      loading.value = false
+    }
+  }
 
-    doc.versions.push({
-      v: nextV,
-      date,
-      uploader: currentUser,
-      size: newSize,
-      note: note || `Pembaruan dokumen v${nextV}`,
+  // ── Fetch single document (with versions) ──
+  async function fetchDocument(id: string): Promise<Doc | null> {
+    try {
+      const { data } = await api.get(`/v1/documents/${id}`)
+      return normalizeDoc(data.data)
+    } catch {
+      return null
+    }
+  }
+
+  // ── Fetch folders ──
+  async function fetchFolders() {
+    try {
+      const { data } = await api.get('/v1/folders')
+      folders.value = (data.data ?? []).map((f: any) => ({
+        ...f,
+        unitId: f.unit_id ?? f.unitId,
+      }))
+    } catch { /* ignore */ }
+  }
+
+  // ── Create Folder ──
+  async function createFolder(payload: { name: string; unit_id?: string; parent_folder_id?: string }) {
+    const { data } = await api.post('/v1/folders', payload)
+    await fetchFolders()
+    logAudit('Membuat folder baru', payload.name)
+    return data.data
+  }
+
+  // ── Fetch categories ──
+  async function fetchCategories() {
+    try {
+      const { data } = await api.get('/v1/categories')
+      categories.value = data.data ?? []
+    } catch { /* ignore */ }
+  }
+
+  // ── Fetch units ──
+  async function fetchUnits() {
+    try {
+      const { data } = await api.get('/v1/units')
+      units.value = data.data ?? []
+    } catch { /* ignore */ }
+  }
+
+  // ── Upload document (with file + tags) ──
+  async function uploadDocument(payload: {
+    name: string
+    folder_id: string
+    category_id: string
+    tags: string      // comma-separated
+    file?: File | null
+    note?: string
+  }): Promise<Doc> {
+    const formData = new FormData()
+    formData.append('name', payload.name)
+    formData.append('folder_id', payload.folder_id)
+    formData.append('category_id', payload.category_id)
+    if (payload.tags) formData.append('tags', payload.tags)
+    if (payload.file) formData.append('file', payload.file)
+    if (payload.note) formData.append('note', payload.note)
+
+    const { data } = await api.post('/v1/documents', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
     })
-    doc.size = newSize
-    doc.date = date
 
-    logAudit('Unggah versi baru', `${doc.name} v${nextV}`)
-    persist()
+    const doc = normalizeDoc(data.data)
+    logAudit('Unggah dokumen', doc.name)
+    return doc
   }
 
-  function revertVersion(docId: string, vnum: number) {
-    const doc = documents.value.find(d => d.id === docId)
-    if (!doc) return
-    const old = doc.versions.find(v => v.v === vnum)
-    if (!old) return
-    const currentUser = authStore.user?.name || 'Fadhil Maulana'
-    const nextV = doc.versions[doc.versions.length - 1].v + 1
-    const date = todayStr()
-
-    doc.versions.push({
-      v: nextV,
-      date,
-      uploader: currentUser,
-      size: old.size,
-      note: `Dipulihkan dari v${vnum}`,
-    })
-    doc.size = old.size
-    doc.date = date
-
-    logAudit('Jadikan versi aktif', `${doc.name} v${nextV} (dari v${vnum})`)
-    persist()
+  // ── Update document ──
+  async function updateDocument(id: string, payload: Record<string, any>): Promise<Doc> {
+    const { data } = await api.put(`/v1/documents/${id}`, payload)
+    const doc = normalizeDoc(data.data)
+    return doc
   }
 
-  function trashDocument(docId: string) {
-    const doc = documents.value.find(d => d.id === docId)
-    if (!doc) return
-    doc.deletedAt = todayStr()
-    logAudit('Pindahkan ke tempat sampah', doc.name)
-    persist()
+  // ── Delete document ──
+  async function deleteDocument(id: string) {
+    const existing = documents.value.find(d => d.id === id)
+    if (existing) {
+      logAudit('Pindahkan ke tempat sampah', existing.name)
+    }
+    await api.delete(`/v1/documents/${id}`)
+    documents.value = documents.value.filter(d => d.id !== id)
   }
 
-  function restoreDocument(docId: string) {
+  // ── Trash & Restore helpers ──
+  async function trashDocument(docId: string) {
     const doc = documents.value.find(d => d.id === docId)
-    if (!doc) return
-    doc.deletedAt = null
-    logAudit('Pulihkan dari tempat sampah', doc.name)
-    persist()
+    logAudit('Pindahkan ke tempat sampah', doc?.name || 'Dokumen')
+    await updateDocument(docId, { status: 'trashed' })
+    await fetchDocuments()
   }
 
-  function purgeDocument(docId: string) {
+  async function restoreDocument(docId: string) {
     const doc = documents.value.find(d => d.id === docId)
-    if (!doc) return
-    const name = doc.name
-    documents.value = documents.value.filter(d => d.id !== docId)
-    logAudit('Hapus permanen', name)
-    persist()
+    logAudit('Pulihkan dari tempat sampah', doc?.name || 'Dokumen')
+    await updateDocument(docId, { status: 'active' })
+    await fetchDocuments()
   }
 
   function downloadDocument(docId: string) {
     const doc = documents.value.find(d => d.id === docId)
-    if (!doc) return
-    logAudit('Unduh dokumen', doc.name)
-    persist()
-  }
-
-  function grantFolderPermission(payload: {
-    folderId: string
-    subjectType: 'user' | 'group'
-    subjectId: string
-    subjectName: string
-    level: 'view' | 'edit' | 'manage'
-  }) {
-    const f = folders.value.find(x => x.id === payload.folderId)
-    const granter = authStore.user?.name || 'Fadhil Maulana'
-    const existing = folderPermissions.value.find(
-      p => p.folderId === payload.folderId && p.subjectType === payload.subjectType && p.subjectId === payload.subjectId
-    )
-
-    if (existing) {
-      existing.level = payload.level
-      existing.grantedBy = granter
-      existing.grantedAt = todayStr()
-    } else {
-      folderPermissions.value.push({
-        id: 'fp' + (folderPermissions.value.length + 1),
-        folderId: payload.folderId,
-        subjectType: payload.subjectType,
-        subjectId: payload.subjectId,
-        subjectName: payload.subjectName,
-        level: payload.level,
-        grantedBy: granter,
-        grantedAt: todayStr(),
-      })
+    if (doc) {
+      logAudit('Unduh dokumen', doc.name)
     }
-
-    const levelLabels: Record<string, string> = { view: 'Lihat', edit: 'Edit', manage: 'Kelola' }
-    const typeLabels: Record<string, string> = { user: 'Pengguna', group: 'Grup' }
-    logAudit(
-      `Memberikan akses folder (${levelLabels[payload.level]}, ${typeLabels[payload.subjectType]})`,
-      `${f ? f.name : payload.folderId} -> ${payload.subjectName}`
-    )
-    persist()
   }
 
-  function revokeFolderPermission(permId: string) {
-    const p = folderPermissions.value.find(x => x.id === permId)
-    if (!p) return
-    const f = folders.value.find(x => x.id === p.folderId)
-    folderPermissions.value = folderPermissions.value.filter(x => x.id !== permId)
-    logAudit('Mencabut akses folder', `${f ? f.name : p.folderId} -> ${p.subjectName}`)
-    persist()
+  // ── Upload new version ──
+  async function uploadVersion(documentId: string, file: File, note?: string): Promise<DocVersion> {
+    const formData = new FormData()
+    formData.append('document_id', documentId)
+    formData.append('file', file)
+    if (note) formData.append('note', note)
+
+    const { data } = await api.post('/v1/document-versions', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
+
+    const doc = documents.value.find(d => d.id === documentId)
+    logAudit('Unggah versi baru', `${doc?.name || 'Dokumen'} v${data.data?.version_number || ''}`)
+    return data.data
+  }
+
+  // ── Delete version ──
+  async function deleteVersion(id: string) {
+    await api.delete(`/v1/document-versions/${id}`)
+  }
+
+  // ── Format helpers ──
+  function fmtSize(bytes?: number): string {
+    if (!bytes) return '0 B'
+    if (bytes < 1024) return bytes + ' B'
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB'
+    return (bytes / (1024 * 1024)).toFixed(1) + ' MB'
   }
 
   return {
-    folders,
-    documents,
-    auditLog,
-    folderPermissions,
-    activeDocs,
-    trashedDocs,
-    totalKB,
-    todayCount,
-    recentActivities,
-    todayStr,
-    fmtSize,
-    logAudit,
-    addFolder,
-    uploadDocument,
-    uploadVersion,
-    revertVersion,
-    trashDocument,
-    restoreDocument,
-    purgeDocument,
-    downloadDocument,
-    grantFolderPermission,
-    revokeFolderPermission,
+    documents, folders, categories, units, loading, error, meta,
+    auditLog, recentActivities, totalKB, todayCount,
+    activeDocs, trashedDocs,
+    fetchDocuments, fetchDocument,
+    fetchFolders, createFolder, fetchCategories, fetchUnits,
+    uploadDocument, updateDocument, deleteDocument,
+    trashDocument, restoreDocument, downloadDocument,
+    uploadVersion, deleteVersion,
+    logAudit, fmtSize, todayStr,
   }
 })
