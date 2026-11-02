@@ -197,8 +197,8 @@ tr.clickable:hover td{ background:var(--surface-2); }
 .muted{ color:var(--text-muted); }
 .num{ font-variant-numeric:tabular-nums; font-family:"IBM Plex Mono",monospace; font-size:12.5px; }
 
-.pill{ display:inline-flex; align-items:center; gap:5px; padding:2px 9px; border-radius:999px; font-size:11.5px; font-weight:600; white-space:nowrap; }
-.pill .dot{ width:6px; height:6px; border-radius:50%; }
+.pill{ display:inline-flex; align-items:center; gap:5px; padding:2px 9px; border-radius:999px; font-size:11.5px; font-weight:600; white-space:nowrap; background:var(--surface-2); color:var(--text); border:1px solid var(--border); }
+.pill .dot{ width:6px; height:6px; border-radius:50%; background:var(--text-muted); }
 .pill.cat-Kontrak{ background:var(--accent-soft); color:var(--accent); }
 .pill.cat-Kontrak .dot{ background:var(--accent); }
 .pill.cat-Keuangan{ background:var(--success-soft); color:var(--success); }
@@ -209,6 +209,16 @@ tr.clickable:hover td{ background:var(--surface-2); }
 .pill.cat-Legal .dot{ background:var(--danger); }
 .pill.cat-Korespondensi{ background:var(--locked-soft); color:var(--locked); }
 .pill.cat-Korespondensi .dot{ background:var(--locked); }
+.pill.cat-Proposal{ background:rgba(245, 158, 11, 0.18); color:#fbbf24; border-color:transparent; }
+.pill.cat-Proposal .dot{ background:#f59e0b; }
+.pill.cat-SuratMasuk, .pill.cat-Surat-Masuk{ background:rgba(6, 182, 212, 0.18); color:#22d3ee; border-color:transparent; }
+.pill.cat-SuratMasuk .dot, .pill.cat-Surat-Masuk .dot{ background:#06b6d4; }
+.pill.cat-SuratKeluar, .pill.cat-Surat-Keluar{ background:rgba(168, 85, 247, 0.18); color:#c084fc; border-color:transparent; }
+.pill.cat-SuratKeluar .dot, .pill.cat-Surat-Keluar .dot{ background:#a855f7; }
+.pill.cat-NotulenRapat, .pill.cat-Notulen-Rapat{ background:rgba(139, 92, 246, 0.18); color:#a78bfa; border-color:transparent; }
+.pill.cat-NotulenRapat .dot, .pill.cat-Notulen-Rapat .dot{ background:#8b5cf6; }
+.pill.cat-BeritaAcara, .pill.cat-Berita-Acara{ background:rgba(20, 184, 166, 0.18); color:#2dd4bf; border-color:transparent; }
+.pill.cat-BeritaAcara .dot, .pill.cat-Berita-Acara .dot{ background:#14b8a6; }
 
 .empty{ padding:36px 16px; text-align:center; color:var(--text-muted); display:flex; flex-direction:column; align-items:center; gap:8px; }
 

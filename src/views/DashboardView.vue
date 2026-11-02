@@ -1,34 +1,42 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onMounted } from 'vue'
 import { RouterLink } from 'vue-router'
 import { useDocumentsStore } from '../stores/documents'
 
 const store = useDocumentsStore()
 
+onMounted(async () => {
+  await Promise.allSettled([
+    store.fetchDocuments(),
+    store.fetchFolders(),
+    store.fetchCategories(),
+  ])
+})
+
 const stats = computed(() => [
   {
     label: 'Total Dokumen',
-    value: store.activeDocs.length,
+    value: store.activeDocs?.length ?? 0,
     hint: 'pada folder yang bisa Anda lihat',
   },
   {
     label: 'Penyimpanan Terpakai',
-    value: store.fmtSize(store.totalKB),
+    value: store.fmtSize(store.totalKB ?? 0),
     hint: 'pada folder yang bisa Anda lihat',
   },
   {
     label: 'Tempat Sampah',
-    value: store.trashedDocs.length,
+    value: store.trashedDocs?.length ?? 0,
     hint: 'dokumen terhapus',
   },
   {
     label: 'Aktivitas Hari Ini',
-    value: store.todayCount,
+    value: store.todayCount ?? 0,
     hint: 'aksi tercatat',
   },
 ])
 
-const recentActivities = computed(() => store.recentActivities)
+const recentActivities = computed(() => store.recentActivities ?? [])
 </script>
 
 <template>

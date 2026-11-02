@@ -43,6 +43,18 @@ export const useAuthStore = defineStore('auth', () => {
     return userRole.value.toLowerCase() === 'admin'
   })
 
+  const isPengelola = computed(() => {
+    return userRole.value.toLowerCase() === 'pengelola'
+  })
+
+  const isPengguna = computed(() => {
+    return userRole.value.toLowerCase() === 'pengguna'
+  })
+
+  const canManageFolder = computed(() => {
+    return isAdmin.value || isPengelola.value
+  })
+
   const login = async (email: string, password: string) => {
     loading.value = true
     try {
@@ -80,6 +92,9 @@ export const useAuthStore = defineStore('auth', () => {
     isAuthenticated,
     userRole,
     isAdmin,
+    isPengelola,
+    isPengguna,
+    canManageFolder,
     login,
     logout,
   }
