@@ -27,6 +27,13 @@ const masterItems = [
   { id: 'kategori', label: 'Kategori', icon: 'tag', to: '/master/kategori' },
 ]
 
+const visibleNav = computed(() => {
+  return nav.filter(item => {
+    if (item.id === 'audit' && authStore.isPengguna) return false
+    return true
+  })
+})
+
 const isMasterOpen = ref(route.path.startsWith('/master'))
 const isMasterActive = computed(() => route.path.startsWith('/master'))
 
@@ -79,7 +86,7 @@ const handleLogout = () => {
       <nav id="nav">
         <!-- Main Navigation Items -->
         <RouterLink 
-          v-for="item in nav" 
+          v-for="item in visibleNav" 
           :key="item.id" 
           :to="item.to" 
           class="navlink"
@@ -87,6 +94,17 @@ const handleLogout = () => {
         >
           <Icon :name="item.icon" :size="16" />
           <span>{{ item.label }}</span>
+        </RouterLink>
+
+        <!-- Menu Pengguna (Khusus Role Pengelola) -->
+        <RouterLink 
+          v-if="authStore.isPengelola"
+          to="/master/pengguna" 
+          class="navlink"
+          :class="{ active: route.path.startsWith('/master/pengguna') }"
+        >
+          <Icon name="user" :size="16" />
+          <span>Pengguna</span>
         </RouterLink>
 
         <!-- Master Dropdown (Khusus Role Admin) -->

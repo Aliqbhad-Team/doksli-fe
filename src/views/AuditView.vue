@@ -1,13 +1,22 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import Select from 'primevue/select'
 import Button from 'primevue/button'
+import Paginator from 'primevue/paginator'
+import ProgressSpinner from 'primevue/progressspinner'
 import { useDocumentsStore } from '../stores/documents'
 
 const store = useDocumentsStore()
 
 const selectedUser = ref<string>('')
 const selectedAction = ref<string>('')
+
+const first = ref(0)
+const rows = 10
+
+watch([selectedUser, selectedAction], () => {
+  first.value = 0
+})
 
 // Unique users from audit log
 const availableUsers = computed(() => {
@@ -34,6 +43,10 @@ const filteredLogs = computed(() => {
     if (selectedAction.value && log.action !== selectedAction.value) return false
     return true
   })
+})
+
+const paginatedLogs = computed(() => {
+  return filteredLogs.value.slice(first.value, first.value + rows)
 })
 
 // Export CSV handler
@@ -125,7 +138,16 @@ function exportCsv() {
             </tr>
           </thead>
           <tbody>
-            <tr v-if="filteredLogs.length === 0">
+            <tr v-if="store.loading">
+              <td colspan="5" style="text-align: center; padding: 32px;" class="muted">
+                <div class="flex flex-col items-center justify-center gap-2">
+                  <ProgressSpinner style="width: 32px; height: 32px" strokeWidth="4" />
+                  <span>Memuat data log audit...</span>
+                </div>
+              </td>
+            </tr>
+
+            <tr v-else-if="filteredLogs.length === 0">
               <td colspan="5">
                 <div class="empty">
                   <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
@@ -136,7 +158,7 @@ function exportCsv() {
               </td>
             </tr>
 
-            <tr v-for="log in filteredLogs" :key="log.id">
+            <tr v-else v-for="log in paginatedLogs" :key="log.id">
               <td class="num">{{ log.time }}</td>
               <td class="audit-user">{{ log.user }}</td>
               <td class="audit-action">{{ log.action }}</td>
@@ -145,6 +167,18 @@ function exportCsv() {
             </tr>
           </tbody>
         </table>
+      </div>
+
+      <!-- Numeric Pagination (PrimeVue) -->
+      <div class="border-t border-[var(--border)] p-2 flex justify-center">
+        <Paginator
+          v-model:first="first"
+          :rows="rows"
+          :totalRecords="filteredLogs.length"
+          :alwaysShow="true"
+          @page="(e) => first = e.first"
+          template="FirstPageLink PrevPageLink PageLinks NextPageLink LastPageLink"
+        />
       </div>
     </div>
   </div>

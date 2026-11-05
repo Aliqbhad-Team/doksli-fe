@@ -1,16 +1,21 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import Dialog from 'primevue/dialog'
 import Button from 'primevue/button'
 import InputText from 'primevue/inputtext'
 import Textarea from 'primevue/textarea'
 import Select from 'primevue/select'
+import Tag from 'primevue/tag'
+import Paginator from 'primevue/paginator'
+import ProgressSpinner from 'primevue/progressspinner'
 import { useDocumentsStore, type Doc, type Folder } from '../stores/documents'
 import { useAuthStore } from '../stores/auth'
+import { useCategoryBadge } from '../composables/useCategoryBadge'
 import { useAppConfirm } from '../composables/useAppConfirm'
 
 const store = useDocumentsStore()
 const authStore = useAuthStore()
+const { getCategoryBadge } = useCategoryBadge()
 const { confirmDelete, confirmAction } = useAppConfirm()
 
 // ─── Folder Navigation & Tab State ───
@@ -63,6 +68,16 @@ const folderDocs = computed(() => {
   }
   const list = activeTab.value === 'trash' ? store.trashedDocs : store.activeDocs
   return list.filter(d => (d.folder_id || d.folderId) === currentFolder.value?.id)
+})
+
+const docFirst = ref(0)
+const folderFirst = ref(0)
+const rows = 10
+const paginatedDocs = computed(() => folderDocs.value.slice(docFirst.value, docFirst.value + rows))
+const paginatedFolders = computed(() => store.folders.slice(folderFirst.value, folderFirst.value + rows))
+
+watch([currentFolder, activeTab], () => {
+  docFirst.value = 0
 })
 
 function getFolderDocCount(folderId: string): number {
@@ -303,19 +318,7 @@ function getCurrentVersion(doc: Doc): any {
   }
 }
 
-function getCategoryBadgeColor(catName: string) {
-  const normalized = (catName || '').toLowerCase().trim()
-  if (normalized.includes('kontrak')) return { bg: 'rgba(59, 130, 246, 0.18)', text: '#60a5fa', dot: '#3b82f6' }
-  if (normalized.includes('keuangan')) return { bg: 'rgba(16, 185, 129, 0.18)', text: '#34d399', dot: '#10b981' }
-  if (normalized.includes('proposal')) return { bg: 'rgba(245, 158, 11, 0.18)', text: '#fbbf24', dot: '#f59e0b' }
-  if (normalized.includes('masuk')) return { bg: 'rgba(6, 182, 212, 0.18)', text: '#22d3ee', dot: '#06b6d4' }
-  if (normalized.includes('keluar')) return { bg: 'rgba(168, 85, 247, 0.18)', text: '#c084fc', dot: '#a855f7' }
-  if (normalized.includes('rapat') || normalized.includes('notulen')) return { bg: 'rgba(139, 92, 246, 0.18)', text: '#a78bfa', dot: '#8b5cf6' }
-  if (normalized.includes('acara')) return { bg: 'rgba(20, 184, 166, 0.18)', text: '#2dd4bf', dot: '#14b8a6' }
-  if (normalized.includes('sdm')) return { bg: 'rgba(234, 88, 12, 0.18)', text: '#fb923c', dot: '#ea580c' }
-  if (normalized.includes('legal')) return { bg: 'rgba(239, 68, 68, 0.18)', text: '#f87171', dot: '#ef4444' }
-  return { bg: 'rgba(148, 163, 184, 0.18)', text: '#cbd5e1', dot: '#94a3b8' }
-}
+
 
 function getUserLevel(doc: Doc) {
   if (canModify(doc)) {
@@ -418,7 +421,10 @@ function getUserLevel(doc: Doc) {
     <!-- ═══════════════════════════════════════════════════════ -->
     <div v-if="!currentFolder && activeTab === 'aktif'" class="panel-body p-2">
       <div v-if="store.loading && store.folders.length === 0" class="empty">
-        <div>Memuat folder...</div>
+        <div class="flex flex-col items-center justify-center gap-2 py-6">
+          <ProgressSpinner style="width: 32px; height: 32px" strokeWidth="4" />
+          <span>Memuat folder...</span>
+        </div>
       </div>
 
       <div v-else-if="store.folders.length === 0" class="empty">
@@ -434,7 +440,7 @@ function getUserLevel(doc: Doc) {
       <!-- Clean list of folder rows matching screenshot 1 -->
       <div v-else class="folder-grid">
         <button
-          v-for="folder in store.folders"
+          v-for="folder in paginatedFolders"
           :key="folder.id"
           type="button"
           class="folder-row"
@@ -447,6 +453,18 @@ function getUserLevel(doc: Doc) {
           <span class="count">{{ getFolderDocCount(folder.id) }} dokumen</span>
         </button>
       </div>
+
+      <!-- Numeric Pagination for Folders -->
+      <div class="border-t border-[var(--border)] p-2 mt-2 flex justify-center">
+        <Paginator
+          v-model:first="folderFirst"
+          :rows="rows"
+          :totalRecords="store.folders.length"
+          :alwaysShow="true"
+          @page="(e) => folderFirst = e.first"
+          template="FirstPageLink PrevPageLink PageLinks NextPageLink LastPageLink"
+        />
+      </div>
     </div>
 
     <!-- ═══════════════════════════════════════════════════════ -->
@@ -455,7 +473,10 @@ function getUserLevel(doc: Doc) {
     <div v-else class="table-scroll">
       <!-- Loading State -->
       <div v-if="store.loading" class="empty">
-        <div>Memuat dokumen...</div>
+        <div class="flex flex-col items-center justify-center gap-2">
+          <ProgressSpinner style="width: 32px; height: 32px" strokeWidth="4" />
+          <span>Memuat dokumen...</span>
+        </div>
       </div>
 
       <!-- Empty State -->
@@ -495,7 +516,7 @@ function getUserLevel(doc: Doc) {
         </thead>
         <tbody>
           <tr
-            v-for="doc in folderDocs"
+            v-for="doc in paginatedDocs"
             :key="doc.id"
             class="clickable"
             @click="openDocDetail(doc)"
@@ -512,20 +533,21 @@ function getUserLevel(doc: Doc) {
 
             <!-- KATEGORI -->
             <td>
-              <span
-                class="pill"
+              <Tag
+                rounded
+                class="category-pill"
                 :style="{
-                  background: getCategoryBadgeColor(getCategoryName(doc)).bg,
-                  color: getCategoryBadgeColor(getCategoryName(doc)).text,
-                  border: '1px solid ' + getCategoryBadgeColor(getCategoryName(doc)).text + '33',
+                  background: getCategoryBadge(getCategoryName(doc)).bg,
+                  color: getCategoryBadge(getCategoryName(doc)).text,
+                  border: getCategoryBadge(getCategoryName(doc)).border,
                 }"
               >
                 <span
                   class="dot"
-                  :style="{ background: getCategoryBadgeColor(getCategoryName(doc)).dot }"
+                  :style="{ background: getCategoryBadge(getCategoryName(doc)).dot }"
                 ></span>
                 {{ getCategoryName(doc) }}
-              </span>
+              </Tag>
             </td>
 
             <!-- PEMILIK -->
@@ -624,6 +646,18 @@ function getUserLevel(doc: Doc) {
           </tr>
         </tbody>
       </table>
+
+      <!-- Numeric Pagination (PrimeVue) -->
+      <div class="border-t border-[var(--border)] p-2 flex justify-center">
+        <Paginator
+          v-model:first="docFirst"
+          :rows="rows"
+          :totalRecords="folderDocs.length"
+          :alwaysShow="true"
+          @page="(e) => docFirst = e.first"
+          template="FirstPageLink PrevPageLink PageLinks NextPageLink LastPageLink"
+        />
+      </div>
     </div>
 
     <!-- ═══════════════════════════════════════════════════════ -->
@@ -636,20 +670,21 @@ function getUserLevel(doc: Doc) {
           <div class="flex flex-col gap-1 pr-4">
             <h3 class="font-bold text-sm leading-snug">{{ selectedDoc.name }}</h3>
             <div class="flex items-center gap-2">
-              <span
-                class="pill"
+              <Tag
+                rounded
+                class="category-pill"
                 :style="{
-                  background: getCategoryBadgeColor(getCategoryName(selectedDoc)).bg,
-                  color: getCategoryBadgeColor(getCategoryName(selectedDoc)).text,
-                  border: '1px solid ' + getCategoryBadgeColor(getCategoryName(selectedDoc)).text + '33',
+                  background: getCategoryBadge(getCategoryName(selectedDoc)).bg,
+                  color: getCategoryBadge(getCategoryName(selectedDoc)).text,
+                  border: getCategoryBadge(getCategoryName(selectedDoc)).border,
                 }"
               >
                 <span
                   class="dot"
-                  :style="{ background: getCategoryBadgeColor(getCategoryName(selectedDoc)).dot }"
+                  :style="{ background: getCategoryBadge(getCategoryName(selectedDoc)).dot }"
                 ></span>
                 {{ getCategoryName(selectedDoc) }}
-              </span>
+              </Tag>
               <span class="text-xs text-text-muted">
                 Folder: {{ getFolderName(selectedDoc.folderId || selectedDoc.folder_id) }}
               </span>

@@ -1,9 +1,13 @@
 <script setup lang="ts">
-import { computed, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { RouterLink } from 'vue-router'
+import Paginator from 'primevue/paginator'
+import ProgressSpinner from 'primevue/progressspinner'
 import { useDocumentsStore } from '../stores/documents'
+import { useAuthStore } from '../stores/auth'
 
 const store = useDocumentsStore()
+const authStore = useAuthStore()
 
 onMounted(async () => {
   await Promise.allSettled([
@@ -12,6 +16,11 @@ onMounted(async () => {
     store.fetchCategories(),
   ])
 })
+
+const first = ref(0)
+const rows = 10
+const allActivities = computed(() => store.auditLog ?? [])
+const paginatedActivities = computed(() => allActivities.value.slice(first.value, first.value + rows))
 
 const stats = computed(() => [
   {
@@ -35,8 +44,6 @@ const stats = computed(() => [
     hint: 'aksi tercatat',
   },
 ])
-
-const recentActivities = computed(() => store.recentActivities ?? [])
 </script>
 
 <template>
@@ -54,31 +61,42 @@ const recentActivities = computed(() => store.recentActivities ?? [])
     <div class="panel">
       <div class="panel-head">
         <h2>Aktivitas Terbaru</h2>
-        <RouterLink to="/audit" class="btn sm ghost" style="color: var(--accent); font-weight: 600">
+        <RouterLink v-if="!authStore.isPengguna" to="/audit" class="btn sm ghost" style="color: var(--accent); font-weight: 600">
           Lihat semua di Log Audit &rarr;
         </RouterLink>
       </div>
 
       <div class="panel-body p-0">
-        <div v-if="recentActivities.length === 0" class="empty">
-          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-            <circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>
-          </svg>
-          <div>Belum ada aktivitas tercatat.</div>
-        </div>
-
-        <div v-else class="table-scroll">
+        <div class="table-scroll">
           <table>
             <thead>
               <tr>
-                <th style="width: 100px">Waktu</th>
-                <th style="width: 160px">Pengguna</th>
+                <th style="width: 140px">Waktu</th>
+                <th style="width: 170px">Pengguna</th>
                 <th>Aktivitas</th>
                 <th style="width: 120px">IP Address</th>
               </tr>
             </thead>
             <tbody>
-              <tr v-for="act in recentActivities" :key="act.id">
+              <tr v-if="store.loading">
+                <td colspan="4" style="text-align: center; padding: 32px;" class="muted">
+                  <div class="flex flex-col items-center justify-center gap-2">
+                    <ProgressSpinner style="width: 32px; height: 32px" strokeWidth="4" />
+                    <span>Memuat aktivitas terbaru...</span>
+                  </div>
+                </td>
+              </tr>
+              <tr v-else-if="allActivities.length === 0">
+                <td colspan="4">
+                  <div class="empty">
+                    <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                      <circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>
+                    </svg>
+                    <div>Belum ada aktivitas tercatat.</div>
+                  </div>
+                </td>
+              </tr>
+              <tr v-else v-for="act in paginatedActivities" :key="act.id">
                 <td class="num muted">{{ act.time }}</td>
                 <td style="font-weight: 600">{{ act.user }}</td>
                 <td>
@@ -90,6 +108,18 @@ const recentActivities = computed(() => store.recentActivities ?? [])
             </tbody>
           </table>
         </div>
+
+        <!-- Numeric Pagination (PrimeVue) -->
+        <div class="border-t border-[var(--border)] p-2 flex justify-center">
+          <Paginator
+            v-model:first="first"
+            :rows="rows"
+            :totalRecords="allActivities.length"
+            :alwaysShow="true"
+            @page="(e) => first = e.first"
+            template="FirstPageLink PrevPageLink PageLinks NextPageLink LastPageLink"
+          />
+        </div>
       </div>
     </div>
   </div>
@@ -98,35 +128,44 @@ const recentActivities = computed(() => store.recentActivities ?? [])
 <style scoped>
 .stats {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
 }
+
 .stat {
+  padding: 16px;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 12px;
-  padding: 14px 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
 }
+
 .stat .label {
-  font-size: 11.5px;
-  color: var(--text-muted);
-  text-transform: uppercase;
-  letter-spacing: .05em;
+  font-size: 13px;
   font-weight: 600;
+  color: var(--text-muted);
 }
+
 .stat .value {
   font-size: 24px;
   font-weight: 700;
+  margin: 6px 0 2px;
   color: var(--text);
-  font-variant-numeric: tabular-nums;
-  line-height: 1.2;
 }
+
 .stat .hint {
   font-size: 11.5px;
   color: var(--text-muted);
-  margin-top: 2px;
+}
+
+@media (max-width: 900px) {
+  .stats {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 500px) {
+  .stats {
+    grid-template-columns: 1fr;
+  }
 }
 </style>

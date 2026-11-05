@@ -1,11 +1,15 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import Dialog from 'primevue/dialog'
 import Button from 'primevue/button'
 import InputText from 'primevue/inputtext'
+import Tag from 'primevue/tag'
+import Paginator from 'primevue/paginator'
+import ProgressSpinner from 'primevue/progressspinner'
 import Icon from '../../components/Icon.vue'
 import api from '../../services/api'
 import { useAppConfirm } from '../../composables/useAppConfirm'
+import { useCategoryBadge } from '../../composables/useCategoryBadge'
 
 interface CategoryItem {
   id?: string
@@ -15,6 +19,7 @@ interface CategoryItem {
 }
 
 const { confirmDelete } = useAppConfirm()
+const { getCategoryBadge, registerCategoryColor } = useCategoryBadge()
 const categoriesList = ref<CategoryItem[]>([])
 const loading = ref(false)
 const submitting = ref(false)
@@ -23,6 +28,10 @@ const editingCategory = ref<CategoryItem | null>(null)
 const catName = ref('')
 const toastMessage = ref('')
 const toastVisible = ref(false)
+
+const first = ref(0)
+const rows = 10
+const paginatedCategories = computed(() => categoriesList.value.slice(first.value, first.value + rows))
 
 function showToast(msg: string) {
   toastMessage.value = msg
@@ -37,7 +46,7 @@ function getErrorMessage(err: any, fallback: string): string {
     return 'Sesi login telah berakhir (Unauthenticated). Silakan login kembali.'
   }
   if (err.response?.status === 403) {
-    return 'Akses ditolak: Hanya Admin yang dapat mengelola kategori.'
+    return err.response?.data?.message || 'Akses ditolak: Anda tidak memiliki izin untuk mengelola kategori.'
   }
   return err.response?.data?.message || fallback
 }
@@ -47,6 +56,9 @@ async function fetchCategories() {
   try {
     const res = await api.get('/v1/categories')
     categoriesList.value = res.data?.data ?? []
+    if (first.value >= categoriesList.value.length) {
+      first.value = 0
+    }
   } catch (err: any) {
     showToast(getErrorMessage(err, 'Gagal memuat kategori'))
   } finally {
@@ -58,16 +70,7 @@ onMounted(() => {
   fetchCategories()
 })
 
-function categoryBadge(name: string) {
-  const vars: Record<string, { bg: string; fg: string }> = {
-    Kontrak: { bg: 'var(--accent-soft)', fg: 'var(--accent)' },
-    Keuangan: { bg: 'var(--success-soft)', fg: 'var(--success)' },
-    SDM: { bg: 'var(--warning-soft)', fg: 'var(--warning)' },
-    Legal: { bg: 'var(--danger-soft)', fg: 'var(--danger)' },
-    Korespondensi: { bg: 'var(--locked-soft)', fg: 'var(--locked)' },
-  }
-  return vars[name] || { bg: 'var(--surface-2)', fg: 'var(--text-muted)' }
-}
+
 
 function openAddModal() {
   editingCategory.value = null
@@ -100,6 +103,7 @@ async function submitCategory() {
       showToast(`Kategori "${name}" berhasil diperbarui`)
     } else {
       await api.post('/v1/categories', { name })
+      registerCategoryColor(name)
       showToast(`Kategori "${name}" berhasil ditambahkan`)
     }
     closeModal()
@@ -166,22 +170,30 @@ function deleteCategory(cat: CategoryItem) {
             </thead>
             <tbody>
               <tr v-if="loading">
-                <td colspan="3" style="text-align: center; padding: 28px;" class="muted">
-                  Memuat data kategori...
+                <td colspan="3" style="text-align: center; padding: 32px;" class="muted">
+                  <div class="flex flex-col items-center justify-center gap-2">
+                    <ProgressSpinner style="width: 32px; height: 32px" strokeWidth="4" />
+                    <span>Memuat data kategori...</span>
+                  </div>
                 </td>
               </tr>
-              <tr v-for="cat in categoriesList" :key="cat.id">
+              <tr v-else v-for="cat in paginatedCategories" :key="cat.id">
                 <td>
                   <b>{{ cat.name }}</b>
                 </td>
                 <td>
-                  <span 
-                    class="pill"
-                    :style="{ background: categoryBadge(cat.name).bg, color: categoryBadge(cat.name).fg }"
+                  <Tag 
+                    rounded
+                    class="category-pill"
+                    :style="{ 
+                      background: getCategoryBadge(cat.name).bg, 
+                      color: getCategoryBadge(cat.name).fg,
+                      border: getCategoryBadge(cat.name).border 
+                    }"
                   >
-                    <span class="dot" :style="{ background: categoryBadge(cat.name).fg }"></span>
-                    {{ cat.name }}
-                  </span>
+                    <span class="dot" :style="{ background: getCategoryBadge(cat.name).dot }"></span>
+                    <span>{{ cat.name }}</span>
+                  </Tag>
                 </td>
                 <td style="text-align: right;">
                   <div class="flex items-center justify-end gap-2">
@@ -206,6 +218,18 @@ function deleteCategory(cat: CategoryItem) {
               </tr>
             </tbody>
           </table>
+        </div>
+
+        <!-- Numeric Pagination (PrimeVue) -->
+        <div class="border-t border-[var(--border)] p-2 flex justify-center">
+          <Paginator
+            v-model:first="first"
+            :rows="rows"
+            :totalRecords="categoriesList.length"
+            :alwaysShow="true"
+            @page="(e) => first = e.first"
+            template="FirstPageLink PrevPageLink PageLinks NextPageLink LastPageLink"
+          />
         </div>
       </div>
     </div>

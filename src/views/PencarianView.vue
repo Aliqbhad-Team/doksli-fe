@@ -1,12 +1,17 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import Select from 'primevue/select'
+import Tag from 'primevue/tag'
+import Paginator from 'primevue/paginator'
+import ProgressSpinner from 'primevue/progressspinner'
 import api from '../services/api'
 import { useDocumentsStore, type Doc } from '../stores/documents'
 import { useAppConfirm } from '../composables/useAppConfirm'
+import { useCategoryBadge } from '../composables/useCategoryBadge'
 
 const store = useDocumentsStore()
 const { confirmDelete, confirmAction } = useAppConfirm()
+const { getCategoryBadge } = useCategoryBadge()
 
 // Filter states
 const q = ref('')
@@ -68,6 +73,14 @@ const searchResults = computed(() => {
   })
 })
 
+const first = ref(0)
+const rows = 10
+const paginatedSearchResults = computed(() => searchResults.value.slice(first.value, first.value + rows))
+
+watch([q, selectedCategory, selectedFolder, includeTrash], () => {
+  first.value = 0
+})
+
 function getFolderName(folderId?: string): string {
   if (!folderId) return '-'
   const f = store.folders.find(x => x.id === folderId)
@@ -86,19 +99,7 @@ function isDocTrashed(doc: Doc): boolean {
   return !!doc.deleted_at || doc.status === 'trashed' || !!doc.deletedAt
 }
 
-function getCategoryBadgeColor(catName: string) {
-  const normalized = (catName || '').toLowerCase().trim()
-  if (normalized.includes('kontrak')) return { bg: 'rgba(59, 130, 246, 0.18)', text: '#60a5fa', dot: '#3b82f6' }
-  if (normalized.includes('keuangan')) return { bg: 'rgba(16, 185, 129, 0.18)', text: '#34d399', dot: '#10b981' }
-  if (normalized.includes('proposal')) return { bg: 'rgba(245, 158, 11, 0.18)', text: '#fbbf24', dot: '#f59e0b' }
-  if (normalized.includes('masuk')) return { bg: 'rgba(6, 182, 212, 0.18)', text: '#22d3ee', dot: '#06b6d4' }
-  if (normalized.includes('keluar')) return { bg: 'rgba(168, 85, 247, 0.18)', text: '#c084fc', dot: '#a855f7' }
-  if (normalized.includes('rapat') || normalized.includes('notulen')) return { bg: 'rgba(139, 92, 246, 0.18)', text: '#a78bfa', dot: '#8b5cf6' }
-  if (normalized.includes('acara')) return { bg: 'rgba(20, 184, 166, 0.18)', text: '#2dd4bf', dot: '#14b8a6' }
-  if (normalized.includes('sdm')) return { bg: 'rgba(234, 88, 12, 0.18)', text: '#fb923c', dot: '#ea580c' }
-  if (normalized.includes('legal')) return { bg: 'rgba(239, 68, 68, 0.18)', text: '#f87171', dot: '#ef4444' }
-  return { bg: 'rgba(148, 163, 184, 0.18)', text: '#cbd5e1', dot: '#94a3b8' }
-}
+
 
 function getCurrentVersion(doc: Doc): any {
   if (doc.latest_version) {
@@ -249,7 +250,16 @@ function handleRestore(doc: Doc) {
             </tr>
           </thead>
           <tbody>
-            <tr v-if="searchResults.length === 0">
+            <tr v-if="store.loading">
+              <td colspan="8" style="text-align: center; padding: 32px;" class="muted">
+                <div class="flex flex-col items-center justify-center gap-2">
+                  <ProgressSpinner style="width: 32px; height: 32px" strokeWidth="4" />
+                  <span>Memuat data dokumen...</span>
+                </div>
+              </td>
+            </tr>
+
+            <tr v-else-if="searchResults.length === 0">
               <td colspan="8">
                 <div class="empty">
                   <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
@@ -261,7 +271,8 @@ function handleRestore(doc: Doc) {
             </tr>
 
             <tr
-              v-for="doc in searchResults"
+              v-else
+              v-for="doc in paginatedSearchResults"
               :key="doc.id"
               class="clickable"
               @click="openDocDetail(doc)"
@@ -281,20 +292,21 @@ function handleRestore(doc: Doc) {
                 </div>
               </td>
               <td>
-                <span
-                  class="pill font-semibold"
+                <Tag
+                  rounded
+                  class="category-pill"
                   :style="{
-                    background: getCategoryBadgeColor(getCategoryName(doc)).bg,
-                    color: getCategoryBadgeColor(getCategoryName(doc)).text,
-                    border: '1px solid ' + getCategoryBadgeColor(getCategoryName(doc)).text + '33',
+                    background: getCategoryBadge(getCategoryName(doc)).bg,
+                    color: getCategoryBadge(getCategoryName(doc)).text,
+                    border: getCategoryBadge(getCategoryName(doc)).border,
                   }"
                 >
                   <span
                     class="dot"
-                    :style="{ background: getCategoryBadgeColor(getCategoryName(doc)).dot }"
+                    :style="{ background: getCategoryBadge(getCategoryName(doc)).dot }"
                   ></span>
                   {{ getCategoryName(doc) }}
-                </span>
+                </Tag>
               </td>
               <td class="muted text-xs">{{ getFolderName(doc.folderId || doc.folder_id) }}</td>
               <td><span class="num">v{{ getCurrentVersion(doc)?.v || 1 }}</span></td>
@@ -331,6 +343,18 @@ function handleRestore(doc: Doc) {
           </tbody>
         </table>
       </div>
+
+      <!-- Numeric Pagination (PrimeVue) -->
+      <div class="border-t border-[var(--border)] p-2 flex justify-center">
+        <Paginator
+          v-model:first="first"
+          :rows="rows"
+          :totalRecords="searchResults.length"
+          :alwaysShow="true"
+          @page="(e) => first = e.first"
+          template="FirstPageLink PrevPageLink PageLinks NextPageLink LastPageLink"
+        />
+      </div>
     </div>
 
     <!-- Scrim & Drawer -->
@@ -341,20 +365,21 @@ function handleRestore(doc: Doc) {
           <div class="flex flex-col gap-1 pr-4">
             <h3 class="font-bold text-sm leading-snug">{{ selectedDoc.name }}</h3>
             <div class="flex items-center gap-2">
-              <span
-                class="pill"
+              <Tag
+                rounded
+                class="category-pill"
                 :style="{
-                  background: getCategoryBadgeColor(getCategoryName(selectedDoc)).bg,
-                  color: getCategoryBadgeColor(getCategoryName(selectedDoc)).text,
-                  border: '1px solid ' + getCategoryBadgeColor(getCategoryName(selectedDoc)).text + '33',
+                  background: getCategoryBadge(getCategoryName(selectedDoc)).bg,
+                  color: getCategoryBadge(getCategoryName(selectedDoc)).text,
+                  border: getCategoryBadge(getCategoryName(selectedDoc)).border,
                 }"
               >
                 <span
                   class="dot"
-                  :style="{ background: getCategoryBadgeColor(getCategoryName(selectedDoc)).dot }"
+                  :style="{ background: getCategoryBadge(getCategoryName(selectedDoc)).dot }"
                 ></span>
                 {{ getCategoryName(selectedDoc) }}
-              </span>
+              </Tag>
               <span class="text-xs text-text-muted">Folder: {{ getFolderName(selectedDoc.folderId || selectedDoc.folder_id) }}</span>
             </div>
           </div>

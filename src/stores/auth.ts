@@ -16,7 +16,17 @@ export interface User {
 const TOKEN_KEY = 'doksli-token'
 const USER_KEY = 'doksli-user'
 
-// Setup store: ref -> state, computed -> getters, function -> actions
+const decodeJWT = (token: string): { exp?: number; [key: string]: any } | null => {
+  try {
+    const payload = token.split('.')[1]
+    if (!payload) return null
+    const decoded = JSON.parse(atob(payload))
+    return decoded
+  } catch {
+    return null
+  }
+}
+
 export const useAuthStore = defineStore('auth', () => {
   const getInitialUser = (): User | null => {
     try {
@@ -55,6 +65,19 @@ export const useAuthStore = defineStore('auth', () => {
     return isAdmin.value || isPengelola.value
   })
 
+  const isTokenExpired = (): boolean => {
+    if (!token.value) return false
+    const payload = decodeJWT(token.value)
+    if (!payload || !payload.exp) return false
+    const now = Math.floor(Date.now() / 1000)
+    return payload.exp < now
+  }
+
+  const isTokenValid = (): boolean => {
+    if (!token.value) return false
+    return !isTokenExpired()
+  }
+
   const login = async (email: string, password: string) => {
     loading.value = true
     try {
@@ -70,7 +93,23 @@ export const useAuthStore = defineStore('auth', () => {
       localStorage.setItem(USER_KEY, JSON.stringify(data.user))
     } catch (error) {
       if (axios.isAxiosError(error)) {
-        throw new Error(error.response?.data?.message ?? 'Login gagal')
+        const data = error.response?.data
+        if (data?.message) {
+          throw new Error(data.message)
+        }
+        if (data?.errors) {
+          const firstField = Object.keys(data.errors)[0]
+          if (firstField && data.errors[firstField]?.[0]) {
+            throw new Error(data.errors[firstField][0])
+          }
+        }
+        if (error.response?.status === 401) {
+          throw new Error('Email atau password salah. Silakan coba lagi.')
+        }
+        if (error.code === 'ERR_NETWORK') {
+          throw new Error('Tidak dapat terhubung ke server backend. Pastikan server aktif.')
+        }
+        throw new Error('Login gagal. Silakan coba lagi.')
       }
       throw error
     } finally {
@@ -95,6 +134,8 @@ export const useAuthStore = defineStore('auth', () => {
     isPengelola,
     isPengguna,
     canManageFolder,
+    isTokenExpired,
+    isTokenValid,
     login,
     logout,
   }

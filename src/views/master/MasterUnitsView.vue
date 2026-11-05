@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import Dialog from 'primevue/dialog'
 import Button from 'primevue/button'
 import InputText from 'primevue/inputtext'
 import Textarea from 'primevue/textarea'
+import Paginator from 'primevue/paginator'
+import ProgressSpinner from 'primevue/progressspinner'
 import Icon from '../../components/Icon.vue'
 import api from '../../services/api'
 import { users, folders } from '../../data/sampleData'
@@ -23,6 +25,10 @@ const submitting = ref(false)
 const isModalOpen = ref(false)
 const isEditing = ref(false)
 const editingUnitId = ref<string | null>(null)
+
+const first = ref(0)
+const rows = 10
+const paginatedUnits = computed(() => unitsList.value.slice(first.value, first.value + rows))
 
 const toastMessage = ref('')
 const toastVisible = ref(false)
@@ -45,7 +51,7 @@ function getErrorMessage(err: any, fallback: string): string {
     return 'Sesi login telah berakhir (Unauthenticated). Silakan login kembali.'
   }
   if (err.response?.status === 403) {
-    return 'Akses ditolak: Hanya Admin yang dapat mengelola unit kerja.'
+    return err.response?.data?.message || 'Akses ditolak: Anda tidak memiliki izin untuk mengelola unit kerja.'
   }
   return err.response?.data?.message || fallback
 }
@@ -55,6 +61,9 @@ async function fetchUnits() {
   try {
     const res = await api.get('/v1/units')
     unitsList.value = res.data?.data ?? []
+    if (first.value >= unitsList.value.length) {
+      first.value = 0
+    }
   } catch (err: any) {
     showToast(getErrorMessage(err, 'Gagal memuat daftar unit kerja'))
   } finally {
@@ -196,11 +205,14 @@ function deleteUnit(unit: UnitItem) {
             </thead>
             <tbody>
               <tr v-if="loading">
-                <td colspan="5" style="text-align: center; padding: 28px;" class="muted">
-                  Memuat data unit kerja...
+                <td colspan="5" style="text-align: center; padding: 32px;" class="muted">
+                  <div class="flex flex-col items-center justify-center gap-2">
+                    <ProgressSpinner style="width: 32px; height: 32px" strokeWidth="4" />
+                    <span>Memuat data unit kerja...</span>
+                  </div>
                 </td>
               </tr>
-              <tr v-for="unit in unitsList" :key="unit.id || unit.name">
+              <tr v-else v-for="unit in paginatedUnits" :key="unit.id || unit.name">
                 <td>
                   <b>{{ unit.name }}</b>
                 </td>
@@ -234,6 +246,18 @@ function deleteUnit(unit: UnitItem) {
               </tr>
             </tbody>
           </table>
+        </div>
+
+        <!-- Numeric Pagination (PrimeVue) -->
+        <div class="border-t border-[var(--border)] p-2 flex justify-center">
+          <Paginator
+            v-model:first="first"
+            :rows="rows"
+            :totalRecords="unitsList.length"
+            :alwaysShow="true"
+            @page="(e) => first = e.first"
+            template="FirstPageLink PrevPageLink PageLinks NextPageLink LastPageLink"
+          />
         </div>
       </div>
     </div>
