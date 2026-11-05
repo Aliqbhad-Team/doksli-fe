@@ -4,7 +4,6 @@ import { useRouter } from 'vue-router'
 import Button from 'primevue/button'
 import InputText from 'primevue/inputtext'
 import Password from 'primevue/password'
-import Message from 'primevue/message'
 import Icon from '../components/Icon.vue'
 import { useTheme } from '../composables/useTheme'
 import { useAuthStore } from '../stores/auth'
@@ -30,8 +29,8 @@ const handleLogin = async () => {
   try {
     await authStore.login(email.value, password.value)
     router.push('/dashboard')
-  } catch (err) {
-    errorMsg.value = err instanceof Error ? err.message : 'Login gagal'
+  } catch (err: any) {
+    errorMsg.value = err?.message || 'Login gagal. Silakan periksa kembali email dan password Anda.'
   } finally {
     isLoading.value = false
   }
@@ -48,17 +47,13 @@ const fillDemo = (demoEmail: string, demoPassword: string) => {
   <div class="login-page">
     <!-- Theme Toggle -->
     <div class="theme-toggle-wrap">
-      <Button 
-        severity="secondary"
-        size="small"
+      <button 
         @click="toggle"
-        class="theme-btn"
+        class="theme-icon-btn"
+        :title="theme === 'light' ? 'Ganti ke Mode Gelap' : 'Ganti ke Mode Terang'"
       >
-        <template #icon>
-          <Icon :name="theme === 'light' ? 'moon' : 'sun'" :size="15" />
-        </template>
-        <span>{{ theme === 'light' ? 'Dark' : 'Light' }}</span>
-      </Button>
+        <Icon :name="theme === 'dark' ? 'moon' : 'sun'" :size="18" />
+      </button>
     </div>
 
     <!-- Login Container -->
@@ -74,10 +69,26 @@ const fillDemo = (demoEmail: string, demoPassword: string) => {
 
       <!-- Form Card -->
       <div class="login-card">
-        <!-- Error -->
-        <Message v-if="errorMsg" severity="error" :closable="false" class="mb-4">
-          {{ errorMsg }}
-        </Message>
+        <!-- Error Notification Banner -->
+        <transition name="shake">
+          <div v-if="errorMsg" class="login-alert-banner" role="alert">
+            <div class="alert-icon-box">
+              <Icon name="alert-circle" :size="18" />
+            </div>
+            <div class="alert-content">
+              <span class="alert-title">Gagal Masuk</span>
+              <span class="alert-desc">{{ errorMsg }}</span>
+            </div>
+            <button 
+              type="button" 
+              class="alert-close-btn" 
+              @click="errorMsg = ''" 
+              title="Tutup pesan"
+            >
+              <Icon name="x" :size="14" />
+            </button>
+          </div>
+        </transition>
 
         <!-- Form -->
         <form @submit.prevent="handleLogin" class="login-form">
@@ -91,6 +102,8 @@ const fillDemo = (demoEmail: string, demoPassword: string) => {
               placeholder="admin@gmail.com" 
               fluid 
               required
+              :invalid="!!errorMsg"
+              @input="errorMsg = ''"
             />
           </div>
 
@@ -105,13 +118,15 @@ const fillDemo = (demoEmail: string, demoPassword: string) => {
               placeholder="••••••••" 
               fluid 
               required
+              :invalid="!!errorMsg"
+              @input="errorMsg = ''"
             />
           </div>
 
           <!-- Submit -->
           <Button 
             type="submit" 
-            label="Masuk" 
+            :label="isLoading ? '' : 'Masuk'" 
             :loading="isLoading" 
             fluid 
             class="submit-btn"
@@ -197,12 +212,27 @@ const fillDemo = (demoEmail: string, demoPassword: string) => {
   right: 16px;
 }
 
-.theme-btn {
-  display: flex;
+.theme-icon-btn {
+  display: inline-flex;
   align-items: center;
-  gap: 8px;
-  font-weight: 600;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
   border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.theme-icon-btn:hover {
+  background: var(--surface-2);
+  border-color: var(--accent);
+}
+
+.theme-icon-btn:active {
+  transform: scale(0.95);
 }
 
 .login-box {
@@ -371,4 +401,70 @@ const fillDemo = (demoEmail: string, demoPassword: string) => {
 .text-danger { color: var(--danger); }
 .text-accent { color: var(--accent); }
 .text-success { color: var(--success); }
+
+.login-alert-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: var(--danger-soft);
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  color: var(--danger);
+  margin-bottom: 16px;
+  animation: alertShake 0.4s ease-in-out;
+}
+
+.alert-icon-box {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.alert-content {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+}
+
+.alert-title {
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.alert-desc {
+  font-size: 12px;
+  opacity: 0.95;
+  line-height: 1.4;
+}
+
+.alert-close-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: var(--danger);
+  opacity: 0.7;
+  padding: 2px;
+  border-radius: 4px;
+  transition: all 0.15s;
+}
+
+.alert-close-btn:hover {
+  opacity: 1;
+  background: rgba(239, 68, 68, 0.15);
+}
+
+@keyframes alertShake {
+  0%, 100% { transform: translateX(0); }
+  20%, 60% { transform: translateX(-5px); }
+  40%, 80% { transform: translateX(5px); }
+}
+
 </style>

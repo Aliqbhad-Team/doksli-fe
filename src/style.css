@@ -168,6 +168,7 @@ main{ min-width:0; padding:22px 26px 60px; display:flex; flex-direction:column; 
 .btn.sm{ padding:5px 9px; font-size:12px; }
 .iconbtn{ display:inline-flex; align-items:center; justify-content:center; width:30px; height:30px; border-radius:7px; border:1px solid var(--border); background:var(--surface); color:var(--text-muted); }
 .iconbtn:hover{ background:var(--surface-2); color:var(--text); }
+.iconbtn:disabled{ opacity:0.35; cursor:not-allowed; pointer-events:none; }
 
 /* breadcrumb + folders */
 .crumbs{ display:flex; align-items:center; gap:4px; font-size:13px; color:var(--text-muted); flex-wrap:wrap; }
@@ -573,5 +574,65 @@ html.theme-switching * {
   background: var(--accent-soft) !important;
   color: var(--accent) !important;
   font-weight: 600 !important;
+}
+
+/* PrimeVue Paginator Theme Adjustments */
+.p-paginator {
+  background: transparent !important;
+  border: none !important;
+  padding: 0.5rem !important;
+  gap: 4px !important;
+}
+
+.p-paginator .p-paginator-page,
+.p-paginator .p-paginator-first,
+.p-paginator .p-paginator-prev,
+.p-paginator .p-paginator-next,
+.p-paginator .p-paginator-last {
+  min-width: 2rem !important;
+  height: 2rem !important;
+  border-radius: 8px !important;
+  font-size: 13px !important;
+  font-weight: 500 !important;
+  color: var(--text) !important;
+}
+
+.p-paginator .p-paginator-page:hover:not(.p-paginator-page-selected),
+.p-paginator .p-paginator-first:hover:not(.p-disabled),
+.p-paginator .p-paginator-prev:hover:not(.p-disabled),
+.p-paginator .p-paginator-next:hover:not(.p-disabled),
+.p-paginator .p-paginator-last:hover:not(.p-disabled) {
+  background: var(--surface-2) !important;
+}
+
+.p-paginator .p-paginator-page.p-paginator-page-selected {
+  background: var(--accent) !important;
+  color: #ffffff !important;
+  font-weight: 600 !important;
+}
+
+/* PrimeVue ProgressSpinner Color */
+.p-progressspinner-circle {
+  stroke: var(--accent) !important;
+}
+
+/* PrimeVue Tag Category Pill Styling */
+.category-pill.p-tag {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 5px !important;
+  padding: 2px 9px !important;
+  font-size: 11.5px !important;
+  font-weight: 600 !important;
+  border-radius: 9999px !important;
+  white-space: nowrap !important;
+  line-height: 1.4 !important;
+}
+
+.category-pill.p-tag .dot {
+  width: 6px !important;
+  height: 6px !important;
+  border-radius: 50% !important;
+  flex-shrink: 0 !important;
 }
 

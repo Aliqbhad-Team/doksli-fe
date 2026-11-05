@@ -1,10 +1,12 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import Dialog from 'primevue/dialog'
 import Button from 'primevue/button'
 import InputText from 'primevue/inputtext'
 import Textarea from 'primevue/textarea'
 import Checkbox from 'primevue/checkbox'
+import Paginator from 'primevue/paginator'
+import ProgressSpinner from 'primevue/progressspinner'
 import Icon from '../../components/Icon.vue'
 import api from '../../services/api'
 import { users as sampleUsers } from '../../data/sampleData'
@@ -46,6 +48,10 @@ const selectedGroup = ref<GroupItem | null>(null)
 const toastMessage = ref('')
 const toastVisible = ref(false)
 
+const first = ref(0)
+const rows = 10
+const paginatedGroups = computed(() => groupsList.value.slice(first.value, first.value + rows))
+
 const form = ref({
   name: '',
   description: '',
@@ -64,7 +70,7 @@ function getErrorMessage(err: any, fallback: string): string {
     return 'Sesi login telah berakhir (Unauthenticated). Silakan login kembali.'
   }
   if (err.response?.status === 403) {
-    return 'Akses ditolak: Hanya Admin yang dapat mengelola grup akses.'
+    return err.response?.data?.message || 'Akses ditolak: Anda tidak memiliki izin untuk mengelola grup akses.'
   }
   return err.response?.data?.message || fallback
 }
@@ -74,6 +80,9 @@ async function fetchGroups() {
   try {
     const res = await api.get('/v1/groups')
     groupsList.value = res.data?.data ?? []
+    if (first.value >= groupsList.value.length) {
+      first.value = 0
+    }
   } catch (err: any) {
     showToast(getErrorMessage(err, 'Gagal memuat daftar grup'))
   } finally {
@@ -92,8 +101,10 @@ async function fetchUsers() {
 }
 
 onMounted(() => {
-  fetchGroups()
-  fetchUsers()
+  Promise.allSettled([
+    fetchGroups(),
+    fetchUsers(),
+  ])
 })
 
 function memberSummary(group: GroupItem): string {
@@ -297,11 +308,14 @@ function getUserUnitName(u: UserItem): string {
             </thead>
             <tbody>
               <tr v-if="loading">
-                <td colspan="3" style="text-align: center; padding: 28px;" class="muted">
-                  Memuat data grup akses...
+                <td colspan="3" style="text-align: center; padding: 32px;" class="muted">
+                  <div class="flex flex-col items-center justify-center gap-2">
+                    <ProgressSpinner style="width: 32px; height: 32px" strokeWidth="4" />
+                    <span>Memuat data grup akses...</span>
+                  </div>
                 </td>
               </tr>
-              <tr v-for="group in groupsList" :key="group.id || group.name">
+              <tr v-else v-for="group in paginatedGroups" :key="group.id || group.name">
                 <td>
                   <b>{{ group.name }}</b>
                   <div v-if="group.description" class="muted" style="font-size: 11.5px; margin-top: 2px;">
@@ -337,6 +351,18 @@ function getUserUnitName(u: UserItem): string {
               </tr>
             </tbody>
           </table>
+        </div>
+
+        <!-- Numeric Pagination (PrimeVue) -->
+        <div class="border-t border-[var(--border)] p-2 flex justify-center">
+          <Paginator
+            v-model:first="first"
+            :rows="rows"
+            :totalRecords="groupsList.length"
+            :alwaysShow="true"
+            @page="(e) => first = e.first"
+            template="FirstPageLink PrevPageLink PageLinks NextPageLink LastPageLink"
+          />
         </div>
       </div>
     </div>
