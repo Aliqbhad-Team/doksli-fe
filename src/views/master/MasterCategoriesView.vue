@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, onMounted } from 'vue'
 import Dialog from 'primevue/dialog'
 import Button from 'primevue/button'
 import InputText from 'primevue/inputtext'
@@ -31,7 +31,13 @@ const toastVisible = ref(false)
 
 const first = ref(0)
 const rows = 10
-const paginatedCategories = computed(() => categoriesList.value.slice(first.value, first.value + rows))
+const totalRecords = ref(0)
+
+function onPageChange(event: { page: number; first: number }) {
+  first.value = event.first
+  const targetPage = event.page + 1
+  fetchCategories(targetPage)
+}
 
 function showToast(msg: string) {
   toastMessage.value = msg
@@ -51,14 +57,17 @@ function getErrorMessage(err: any, fallback: string): string {
   return err.response?.data?.message || fallback
 }
 
-async function fetchCategories() {
+async function fetchCategories(page = 1) {
   loading.value = true
   try {
-    const res = await api.get('/v1/categories')
+    const res = await api.get('/v1/categories', {
+      params: {
+        page,
+        per_page: rows,
+      },
+    })
     categoriesList.value = res.data?.data ?? []
-    if (first.value >= categoriesList.value.length) {
-      first.value = 0
-    }
+    totalRecords.value = res.data?.meta?.total ?? categoriesList.value.length
   } catch (err: any) {
     showToast(getErrorMessage(err, 'Gagal memuat kategori'))
   } finally {
@@ -107,7 +116,7 @@ async function submitCategory() {
       showToast(`Kategori "${name}" berhasil ditambahkan`)
     }
     closeModal()
-    await fetchCategories()
+    await fetchCategories(Math.floor(first.value / rows) + 1)
   } catch (err: any) {
     const defaultErr = editingCategory.value ? 'Gagal memperbarui kategori' : 'Gagal menambahkan kategori'
     showToast(getErrorMessage(err, defaultErr))
@@ -133,7 +142,10 @@ function deleteCategory(cat: CategoryItem) {
       try {
         await api.delete(`/v1/categories/${cat.id}`)
         showToast(`Kategori "${cat.name}" dihapus`)
-        await fetchCategories()
+        if (categoriesList.value.length === 1 && first.value > 0) {
+          first.value = Math.max(0, first.value - rows)
+        }
+        await fetchCategories(Math.floor(first.value / rows) + 1)
       } catch (err: any) {
         showToast(getErrorMessage(err, 'Gagal menghapus kategori'))
         if (err.response?.status === 401) {
@@ -177,7 +189,7 @@ function deleteCategory(cat: CategoryItem) {
                   </div>
                 </td>
               </tr>
-              <tr v-else v-for="cat in paginatedCategories" :key="cat.id">
+              <tr v-else v-for="cat in categoriesList" :key="cat.id">
                 <td>
                   <b>{{ cat.name }}</b>
                 </td>
@@ -225,9 +237,9 @@ function deleteCategory(cat: CategoryItem) {
           <Paginator
             v-model:first="first"
             :rows="rows"
-            :totalRecords="categoriesList.length"
+            :totalRecords="totalRecords"
             :alwaysShow="true"
-            @page="(e) => first = e.first"
+            @page="onPageChange"
             template="FirstPageLink PrevPageLink PageLinks NextPageLink LastPageLink"
           />
         </div>

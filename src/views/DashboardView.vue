@@ -3,24 +3,47 @@ import { ref, computed, onMounted } from 'vue'
 import { RouterLink } from 'vue-router'
 import Paginator from 'primevue/paginator'
 import ProgressSpinner from 'primevue/progressspinner'
-import { useDocumentsStore } from '../stores/documents'
+import { useDocumentsStore, type Audit } from '../stores/documents'
 import { useAuthStore } from '../stores/auth'
 
 const store = useDocumentsStore()
 const authStore = useAuthStore()
+
+const first = ref(0)
+const rows = 10
+const totalRecords = ref(0)
+const loadingActivities = ref(false)
+const activitiesList = ref<Audit[]>([])
+
+async function fetchActivities(page = 1) {
+  loadingActivities.value = true
+  try {
+    const res = await store.fetchAuditLogs({ page, per_page: rows })
+    activitiesList.value = res.data ?? []
+    totalRecords.value = res.meta?.total ?? activitiesList.value.length
+  } catch {
+    // fallback to store mock audit log
+    activitiesList.value = store.auditLog.slice(first.value, first.value + rows)
+    totalRecords.value = store.auditLog.length
+  } finally {
+    loadingActivities.value = false
+  }
+}
+
+function onPageChange(event: { page: number; first: number }) {
+  first.value = event.first
+  const targetPage = event.page + 1
+  fetchActivities(targetPage)
+}
 
 onMounted(async () => {
   await Promise.allSettled([
     store.fetchDocuments(),
     store.fetchFolders(),
     store.fetchCategories(),
+    fetchActivities(1),
   ])
 })
-
-const first = ref(0)
-const rows = 10
-const allActivities = computed(() => store.auditLog ?? [])
-const paginatedActivities = computed(() => allActivities.value.slice(first.value, first.value + rows))
 
 const stats = computed(() => [
   {
@@ -78,7 +101,7 @@ const stats = computed(() => [
               </tr>
             </thead>
             <tbody>
-              <tr v-if="store.loading">
+              <tr v-if="loadingActivities">
                 <td colspan="4" style="text-align: center; padding: 32px;" class="muted">
                   <div class="flex flex-col items-center justify-center gap-2">
                     <ProgressSpinner style="width: 32px; height: 32px" strokeWidth="4" />
@@ -86,7 +109,7 @@ const stats = computed(() => [
                   </div>
                 </td>
               </tr>
-              <tr v-else-if="allActivities.length === 0">
+              <tr v-else-if="activitiesList.length === 0">
                 <td colspan="4">
                   <div class="empty">
                     <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
@@ -96,7 +119,7 @@ const stats = computed(() => [
                   </div>
                 </td>
               </tr>
-              <tr v-else v-for="act in paginatedActivities" :key="act.id">
+              <tr v-else v-for="act in activitiesList" :key="act.id">
                 <td class="num muted">{{ act.time }}</td>
                 <td style="font-weight: 600">{{ act.user }}</td>
                 <td>
@@ -114,9 +137,9 @@ const stats = computed(() => [
           <Paginator
             v-model:first="first"
             :rows="rows"
-            :totalRecords="allActivities.length"
+            :totalRecords="totalRecords"
             :alwaysShow="true"
-            @page="(e) => first = e.first"
+            @page="onPageChange"
             template="FirstPageLink PrevPageLink PageLinks NextPageLink LastPageLink"
           />
         </div>

@@ -199,7 +199,7 @@ export const useDocumentsStore = defineStore('documents', () => {
   }
 
   // ── Fetch documents ──
-  async function fetchDocuments(params?: Record<string, string>) {
+  async function fetchDocuments(params?: Record<string, any>) {
     loading.value = true
     error.value = null
     try {
@@ -207,8 +207,10 @@ export const useDocumentsStore = defineStore('documents', () => {
       const list = (data.data ?? []).map(normalizeDoc)
       documents.value = list
       meta.value = data.meta ?? null
+      return data
     } catch (e: any) {
       error.value = e.response?.data?.message ?? 'Gagal memuat dokumen'
+      throw e
     } finally {
       loading.value = false
     }
@@ -225,13 +227,14 @@ export const useDocumentsStore = defineStore('documents', () => {
   }
 
   // ── Fetch folders ──
-  async function fetchFolders() {
+  async function fetchFolders(params?: Record<string, any>) {
     try {
-      const { data } = await api.get('/v1/folders')
+      const { data } = await api.get('/v1/folders', { params })
       folders.value = (data.data ?? []).map((f: any) => ({
         ...f,
         unitId: f.unit_id ?? f.unitId,
       }))
+      return data
     } catch { /* ignore */ }
   }
 
@@ -244,19 +247,33 @@ export const useDocumentsStore = defineStore('documents', () => {
   }
 
   // ── Fetch categories ──
-  async function fetchCategories() {
+  async function fetchCategories(params?: Record<string, any>) {
     try {
-      const { data } = await api.get('/v1/categories')
+      const { data } = await api.get('/v1/categories', { params: { all: true, ...params } })
       categories.value = data.data ?? []
+      return data
     } catch { /* ignore */ }
   }
 
   // ── Fetch units ──
-  async function fetchUnits() {
+  async function fetchUnits(params?: Record<string, any>) {
     try {
-      const { data } = await api.get('/v1/units')
+      const { data } = await api.get('/v1/units', { params: { all: true, ...params } })
       units.value = data.data ?? []
+      return data
     } catch { /* ignore */ }
+  }
+
+  // ── Fetch Audit Logs from Backend ──
+  async function fetchAuditLogs(params?: Record<string, any>) {
+    const { data } = await api.get('/v1/audit-logs', { params })
+    return data
+  }
+
+  // ── Fetch Audit Filters from Backend ──
+  async function fetchAuditFilters() {
+    const { data } = await api.get('/v1/audit-logs/filters')
+    return data.data ?? { users: [], actions: [] }
   }
 
   // ── Upload document (with file + tags) ──
@@ -359,6 +376,7 @@ export const useDocumentsStore = defineStore('documents', () => {
     activeDocs, trashedDocs,
     fetchDocuments, fetchDocument,
     fetchFolders, createFolder, fetchCategories, fetchUnits,
+    fetchAuditLogs, fetchAuditFilters,
     uploadDocument, updateDocument, deleteDocument,
     trashDocument, restoreDocument, downloadDocument,
     uploadVersion, deleteVersion,
