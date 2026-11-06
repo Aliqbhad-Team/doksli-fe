@@ -83,7 +83,13 @@ const toastVisible = ref(false)
 
 const first = ref(0)
 const rows = 10
-const paginatedUsers = computed(() => usersList.value.slice(first.value, first.value + rows))
+const totalRecords = ref(0)
+
+function onPageChange(event: { page: number; first: number }) {
+  first.value = event.first
+  const targetPage = event.page + 1
+  fetchUsers(targetPage)
+}
 
 const form = ref({
   name: '',
@@ -111,14 +117,17 @@ function getErrorMessage(err: any, fallback: string): string {
   return err.response?.data?.message || fallback
 }
 
-async function fetchUsers() {
+async function fetchUsers(page = 1) {
   loading.value = true
   try {
-    const res = await api.get('/v1/users')
+    const res = await api.get('/v1/users', {
+      params: {
+        page,
+        per_page: rows,
+      },
+    })
     usersList.value = res.data?.data ?? []
-    if (first.value >= usersList.value.length) {
-      first.value = 0
-    }
+    totalRecords.value = res.data?.meta?.total ?? usersList.value.length
   } catch (err: any) {
     showToast(getErrorMessage(err, 'Gagal memuat daftar pengguna'))
   } finally {
@@ -130,7 +139,7 @@ async function fetchRolesAndUnits() {
   try {
     const [rolesRes, unitsRes] = await Promise.all([
       api.get('/v1/roles'),
-      api.get('/v1/units'),
+      api.get('/v1/units', { params: { all: true } }),
     ])
     // Filter role admin karena admin hanya 1 dari seeder
     const allRoles: RoleItem[] = rolesRes.data?.data ?? []
@@ -280,7 +289,7 @@ async function submitUser() {
     }
 
     closeModal()
-    await fetchUsers()
+    await fetchUsers(Math.floor(first.value / rows) + 1)
   } catch (err: any) {
     showToast(getErrorMessage(err, isEditMode.value ? 'Gagal memperbarui pengguna' : 'Gagal menambahkan pengguna'))
     if (err.response?.status === 401) {
@@ -302,7 +311,7 @@ async function toggleStatus(user: UserItem) {
   try {
     await api.put(`/v1/users/${user.id}`, { status: newStatus })
     showToast(`Status "${user.name}" diubah menjadi ${newStatus === 'active' ? 'Aktif' : 'Nonaktif'}`)
-    await fetchUsers()
+    await fetchUsers(Math.floor(first.value / rows) + 1)
   } catch (err: any) {
     showToast(getErrorMessage(err, 'Gagal memperbarui status pengguna'))
     if (err.response?.status === 401) {
@@ -327,7 +336,10 @@ function deleteUser(user: UserItem) {
       try {
         await api.delete(`/v1/users/${user.id}`)
         showToast(`Pengguna "${user.name}" telah dihapus`)
-        await fetchUsers()
+        if (usersList.value.length === 1 && first.value > 0) {
+          first.value = Math.max(0, first.value - rows)
+        }
+        await fetchUsers(Math.floor(first.value / rows) + 1)
       } catch (err: any) {
         showToast(getErrorMessage(err, 'Gagal menghapus pengguna'))
         if (err.response?.status === 401) {
@@ -377,7 +389,7 @@ function deleteUser(user: UserItem) {
                   </div>
                 </td>
               </tr>
-              <tr v-else v-for="user in paginatedUsers" :key="user.id">
+              <tr v-else v-for="user in usersList" :key="user.id">
                 <td>
                   <span class="user-name">{{ user.name }}</span>
                 </td>
@@ -460,9 +472,9 @@ function deleteUser(user: UserItem) {
           <Paginator
             v-model:first="first"
             :rows="rows"
-            :totalRecords="usersList.length"
+            :totalRecords="totalRecords"
             :alwaysShow="true"
-            @page="(e) => first = e.first"
+            @page="onPageChange"
             template="FirstPageLink PrevPageLink PageLinks NextPageLink LastPageLink"
           />
         </div>

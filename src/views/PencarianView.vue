@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, watch, onMounted } from 'vue'
 import Select from 'primevue/select'
 import Tag from 'primevue/tag'
 import Paginator from 'primevue/paginator'
@@ -25,14 +25,68 @@ const isDrawerOpen = ref(false)
 
 const categories = ref<string[]>(['Kontrak', 'Keuangan', 'SDM', 'Legal', 'Korespondensi'])
 
+// Server-side search & pagination states
+const searchResults = ref<Doc[]>([])
+const totalRecords = ref(0)
+const loading = ref(false)
+const first = ref(0)
+const rows = 10
+
+async function executeSearch(page = 1) {
+  loading.value = true
+  try {
+    const params: Record<string, any> = {
+      page,
+      per_page: rows,
+    }
+    if (q.value.trim()) params.search = q.value.trim()
+    if (selectedCategory.value) params.category_id = selectedCategory.value
+    if (selectedFolder.value) params.folder_id = selectedFolder.value
+    if (includeTrash.value) {
+      params.include_trash = true
+    } else {
+      params.status = 'active'
+    }
+
+    await store.fetchDocuments(params)
+    searchResults.value = store.documents
+    totalRecords.value = store.meta?.total ?? searchResults.value.length
+  } catch {
+    searchResults.value = []
+    totalRecords.value = 0
+  } finally {
+    loading.value = false
+  }
+}
+
+function onPageChange(event: { page: number; first: number }) {
+  first.value = event.first
+  const targetPage = event.page + 1
+  executeSearch(targetPage)
+}
+
+let searchTimeout: any = null
+watch(q, () => {
+  clearTimeout(searchTimeout)
+  searchTimeout = setTimeout(() => {
+    first.value = 0
+    executeSearch(1)
+  }, 300)
+})
+
+watch([selectedCategory, selectedFolder, includeTrash], () => {
+  first.value = 0
+  executeSearch(1)
+})
+
 onMounted(async () => {
   await Promise.allSettled([
-    store.fetchDocuments(),
+    executeSearch(1),
     store.fetchFolders(),
     store.fetchCategories(),
   ])
   try {
-    const res = await api.get('/v1/categories')
+    const res = await api.get('/v1/categories', { params: { all: true } })
     if (res.data?.data && Array.isArray(res.data.data)) {
       const fromApi = res.data.data.map((c: any) => c.name)
       categories.value = Array.from(new Set([...fromApi, ...categories.value]))
@@ -40,45 +94,6 @@ onMounted(async () => {
   } catch {
     // fallback
   }
-})
-
-// Filtered documents
-const searchResults = computed(() => {
-  const query = q.value.toLowerCase().trim()
-  const cat = selectedCategory.value
-  const fId = selectedFolder.value
-
-  const baseList = includeTrash.value ? store.documents : store.activeDocs
-
-  return baseList.filter(doc => {
-    // text query match name or tags
-    if (query) {
-      const matchName = (doc.name || '').toLowerCase().includes(query)
-      const matchTag = doc.tags?.some((t: any) => {
-        const tagName = typeof t === 'string' ? t : (t?.name ?? '')
-        return tagName.toLowerCase().includes(query)
-      })
-      if (!matchName && !matchTag) return false
-    }
-
-    // category match
-    const docCategory = doc.category?.name || doc.categoryName || (typeof doc.category === 'string' ? doc.category : '')
-    if (cat && docCategory !== cat && doc.category_id !== cat) return false
-
-    // folder match
-    const docFolder = doc.folderId || doc.folder_id
-    if (fId && docFolder !== fId) return false
-
-    return true
-  })
-})
-
-const first = ref(0)
-const rows = 10
-const paginatedSearchResults = computed(() => searchResults.value.slice(first.value, first.value + rows))
-
-watch([q, selectedCategory, selectedFolder, includeTrash], () => {
-  first.value = 0
 })
 
 function getFolderName(folderId?: string): string {
@@ -142,6 +157,7 @@ function handleTrash(doc: Doc) {
     onAccept: async () => {
       await store.trashDocument(doc.id)
       if (selectedDoc.value?.id === doc.id) closeDrawer()
+      await executeSearch(Math.floor(first.value / rows) + 1)
     },
   })
 }
@@ -154,6 +170,7 @@ function handleRestore(doc: Doc) {
     onAccept: async () => {
       await store.restoreDocument(doc.id)
       if (selectedDoc.value?.id === doc.id) closeDrawer()
+      await executeSearch(Math.floor(first.value / rows) + 1)
     },
   })
 }
@@ -229,7 +246,7 @@ function handleRestore(doc: Doc) {
     <!-- Results Panel -->
     <div class="panel">
       <div class="panel-head flex items-center justify-between">
-        <h2>{{ searchResults.length }} hasil ditemukan</h2>
+        <h2>{{ totalRecords }} hasil ditemukan</h2>
         <span v-if="includeTrash" class="text-xs text-muted">
           (Termasuk dokumen di tempat sampah)
         </span>
@@ -250,7 +267,7 @@ function handleRestore(doc: Doc) {
             </tr>
           </thead>
           <tbody>
-            <tr v-if="store.loading">
+            <tr v-if="loading">
               <td colspan="8" style="text-align: center; padding: 32px;" class="muted">
                 <div class="flex flex-col items-center justify-center gap-2">
                   <ProgressSpinner style="width: 32px; height: 32px" strokeWidth="4" />
@@ -272,7 +289,7 @@ function handleRestore(doc: Doc) {
 
             <tr
               v-else
-              v-for="doc in paginatedSearchResults"
+              v-for="doc in searchResults"
               :key="doc.id"
               class="clickable"
               @click="openDocDetail(doc)"
@@ -349,9 +366,9 @@ function handleRestore(doc: Doc) {
         <Paginator
           v-model:first="first"
           :rows="rows"
-          :totalRecords="searchResults.length"
+          :totalRecords="totalRecords"
           :alwaysShow="true"
-          @page="(e) => first = e.first"
+          @page="onPageChange"
           template="FirstPageLink PrevPageLink PageLinks NextPageLink LastPageLink"
         />
       </div>

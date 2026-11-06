@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, onMounted } from 'vue'
 import Dialog from 'primevue/dialog'
 import Button from 'primevue/button'
 import InputText from 'primevue/inputtext'
@@ -28,7 +28,13 @@ const editingUnitId = ref<string | null>(null)
 
 const first = ref(0)
 const rows = 10
-const paginatedUnits = computed(() => unitsList.value.slice(first.value, first.value + rows))
+const totalRecords = ref(0)
+
+function onPageChange(event: { page: number; first: number }) {
+  first.value = event.first
+  const targetPage = event.page + 1
+  fetchUnits(targetPage)
+}
 
 const toastMessage = ref('')
 const toastVisible = ref(false)
@@ -56,14 +62,17 @@ function getErrorMessage(err: any, fallback: string): string {
   return err.response?.data?.message || fallback
 }
 
-async function fetchUnits() {
+async function fetchUnits(page = 1) {
   loading.value = true
   try {
-    const res = await api.get('/v1/units')
+    const res = await api.get('/v1/units', {
+      params: {
+        page,
+        per_page: rows,
+      },
+    })
     unitsList.value = res.data?.data ?? []
-    if (first.value >= unitsList.value.length) {
-      first.value = 0
-    }
+    totalRecords.value = res.data?.meta?.total ?? unitsList.value.length
   } catch (err: any) {
     showToast(getErrorMessage(err, 'Gagal memuat daftar unit kerja'))
   } finally {
@@ -137,7 +146,7 @@ async function submitUnit() {
       showToast(`Unit "${name}" berhasil ditambahkan`)
     }
     closeModal()
-    await fetchUnits()
+    await fetchUnits(Math.floor(first.value / rows) + 1)
   } catch (err: any) {
     const defaultErr = isEditing.value ? 'Gagal memperbarui unit' : 'Gagal menambahkan unit'
     showToast(getErrorMessage(err, defaultErr))
@@ -166,7 +175,10 @@ function deleteUnit(unit: UnitItem) {
       try {
         await api.delete(`/v1/units/${unit.id}`)
         showToast(`Unit "${unit.name}" telah dihapus`)
-        await fetchUnits()
+        if (unitsList.value.length === 1 && first.value > 0) {
+          first.value = Math.max(0, first.value - rows)
+        }
+        await fetchUnits(Math.floor(first.value / rows) + 1)
       } catch (err: any) {
         showToast(getErrorMessage(err, 'Gagal menghapus unit'))
         if (err.response?.status === 401) {
@@ -212,7 +224,7 @@ function deleteUnit(unit: UnitItem) {
                   </div>
                 </td>
               </tr>
-              <tr v-else v-for="unit in paginatedUnits" :key="unit.id || unit.name">
+              <tr v-else v-for="unit in unitsList" :key="unit.id || unit.name">
                 <td>
                   <b>{{ unit.name }}</b>
                 </td>
@@ -253,9 +265,9 @@ function deleteUnit(unit: UnitItem) {
           <Paginator
             v-model:first="first"
             :rows="rows"
-            :totalRecords="unitsList.length"
+            :totalRecords="totalRecords"
             :alwaysShow="true"
-            @page="(e) => first = e.first"
+            @page="onPageChange"
             template="FirstPageLink PrevPageLink PageLinks NextPageLink LastPageLink"
           />
         </div>

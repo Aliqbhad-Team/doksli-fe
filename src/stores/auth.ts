@@ -16,20 +16,57 @@ export interface User {
 const TOKEN_KEY = 'doksli-token'
 const USER_KEY = 'doksli-user'
 
-const decodeJWT = (token: string): { exp?: number; [key: string]: any } | null => {
+export const decodeJWT = (token: string): { exp?: number; [key: string]: any } | null => {
   try {
-    const payload = token.split('.')[1]
-    if (!payload) return null
-    const decoded = JSON.parse(atob(payload))
-    return decoded
+    const parts = token.split('.')
+    if (parts.length !== 3) return null
+    let base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/')
+    while (base64.length % 4) {
+      base64 += '='
+    }
+    const jsonStr = decodeURIComponent(
+      atob(base64)
+        .split('')
+        .map(c => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
+        .join('')
+    )
+    return JSON.parse(jsonStr)
   } catch {
     return null
   }
 }
 
+export const checkIsTokenExpired = (t: string | null): boolean => {
+  if (!t) return true
+  const payload = decodeJWT(t)
+  if (!payload || typeof payload.exp !== 'number') return true
+  const now = Math.floor(Date.now() / 1000)
+  return payload.exp < now
+}
+
 export const useAuthStore = defineStore('auth', () => {
+  const getInitialToken = (): string | null => {
+    try {
+      const stored = localStorage.getItem(TOKEN_KEY)
+      if (stored && !checkIsTokenExpired(stored)) {
+        return stored
+      }
+      if (stored) {
+        localStorage.removeItem(TOKEN_KEY)
+        localStorage.removeItem(USER_KEY)
+      }
+      return null
+    } catch {
+      return null
+    }
+  }
+
   const getInitialUser = (): User | null => {
     try {
+      const storedToken = localStorage.getItem(TOKEN_KEY)
+      if (!storedToken || checkIsTokenExpired(storedToken)) {
+        return null
+      }
       const stored = localStorage.getItem(USER_KEY)
       return stored ? JSON.parse(stored) : null
     } catch {
@@ -37,10 +74,10 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
+  const token = ref<string | null>(getInitialToken())
   const user = ref<User | null>(getInitialUser())
-  const token = ref<string | null>(localStorage.getItem(TOKEN_KEY))
   const loading = ref(false)
-  const isAuthenticated = computed(() => !!token.value)
+  const isAuthenticated = computed(() => isTokenValid())
 
   const userRole = computed(() => {
     if (!user.value) return 'Admin'
@@ -66,16 +103,31 @@ export const useAuthStore = defineStore('auth', () => {
   })
 
   const isTokenExpired = (): boolean => {
-    if (!token.value) return false
-    const payload = decodeJWT(token.value)
-    if (!payload || !payload.exp) return false
-    const now = Math.floor(Date.now() / 1000)
-    return payload.exp < now
+    return checkIsTokenExpired(token.value)
   }
 
   const isTokenValid = (): boolean => {
     if (!token.value) return false
-    return !isTokenExpired()
+    return !checkIsTokenExpired(token.value)
+  }
+
+  const checkAuth = async (): Promise<boolean> => {
+    if (!token.value || isTokenExpired()) {
+      logout()
+      return false
+    }
+    try {
+      const res = await api.get('/v1/auth/me')
+      const userData = res.data?.data ?? res.data?.user ?? res.data
+      if (userData) {
+        user.value = userData
+        localStorage.setItem(USER_KEY, JSON.stringify(userData))
+      }
+      return true
+    } catch {
+      logout()
+      return false
+    }
   }
 
   const login = async (email: string, password: string) => {
@@ -136,6 +188,7 @@ export const useAuthStore = defineStore('auth', () => {
     canManageFolder,
     isTokenExpired,
     isTokenValid,
+    checkAuth,
     login,
     logout,
   }

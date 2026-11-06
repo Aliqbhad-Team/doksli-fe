@@ -52,6 +52,7 @@ const pageTitle = computed(() => {
 onMounted(() => {
   init()
   isDark.value = theme.value === 'dark'
+  authStore.checkAuth()
 })
 
 watch(isDark, (val) => {

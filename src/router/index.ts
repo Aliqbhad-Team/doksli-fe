@@ -81,10 +81,10 @@ router.beforeEach((to, _from, next) => {
   const requiredRole = to.matched.find(record => record.meta.requiredRole)?.meta.requiredRole as string | string[] | undefined
 
   if (requiresAuth && !authStore.isTokenValid()) {
-    if (authStore.isTokenExpired()) {
-      authStore.logout()
-    }
+    authStore.logout()
     next('/login')
+  } else if (to.path === '/login' && authStore.isTokenValid()) {
+    next('/dashboard')
   } else if (requiredRole) {
     const roles = Array.isArray(requiredRole) ? requiredRole.map((r: string) => r.toLowerCase()) : [String(requiredRole).toLowerCase()]
     const hasPermission = roles.includes(authStore.userRole.toLowerCase())
@@ -93,8 +93,6 @@ router.beforeEach((to, _from, next) => {
     } else {
       next()
     }
-  } else if (to.path === '/login' && authStore.isAuthenticated) {
-    next('/dashboard')
   } else {
     next()
   }

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, onMounted } from 'vue'
 import Dialog from 'primevue/dialog'
 import Button from 'primevue/button'
 import InputText from 'primevue/inputtext'
@@ -50,7 +50,13 @@ const toastVisible = ref(false)
 
 const first = ref(0)
 const rows = 10
-const paginatedGroups = computed(() => groupsList.value.slice(first.value, first.value + rows))
+const totalRecords = ref(0)
+
+function onPageChange(event: { page: number; first: number }) {
+  first.value = event.first
+  const targetPage = event.page + 1
+  fetchGroups(targetPage)
+}
 
 const form = ref({
   name: '',
@@ -75,14 +81,17 @@ function getErrorMessage(err: any, fallback: string): string {
   return err.response?.data?.message || fallback
 }
 
-async function fetchGroups() {
+async function fetchGroups(page = 1) {
   loading.value = true
   try {
-    const res = await api.get('/v1/groups')
+    const res = await api.get('/v1/groups', {
+      params: {
+        page,
+        per_page: rows,
+      },
+    })
     groupsList.value = res.data?.data ?? []
-    if (first.value >= groupsList.value.length) {
-      first.value = 0
-    }
+    totalRecords.value = res.data?.meta?.total ?? groupsList.value.length
   } catch (err: any) {
     showToast(getErrorMessage(err, 'Gagal memuat daftar grup'))
   } finally {
@@ -92,7 +101,7 @@ async function fetchGroups() {
 
 async function fetchUsers() {
   try {
-    const res = await api.get('/v1/users')
+    const res = await api.get('/v1/users', { params: { all: true } })
     allUsers.value = res.data?.data ?? []
   } catch {
     // fallback to sampleUsers if users endpoint unavailable
@@ -163,7 +172,7 @@ async function submitGroup() {
       showToast(`Grup "${name}" berhasil dibuat`)
     }
     closeFormModal()
-    await fetchGroups()
+    await fetchGroups(Math.floor(first.value / rows) + 1)
   } catch (err: any) {
     const defaultErr = isEditing.value ? 'Gagal memperbarui grup' : 'Gagal membuat grup'
     showToast(getErrorMessage(err, defaultErr))
@@ -192,7 +201,10 @@ function deleteGroup(group: GroupItem) {
       try {
         await api.delete(`/v1/groups/${group.id}`)
         showToast(`Grup "${group.name}" dihapus`)
-        await fetchGroups()
+        if (groupsList.value.length === 1 && first.value > 0) {
+          first.value = Math.max(0, first.value - rows)
+        }
+        await fetchGroups(Math.floor(first.value / rows) + 1)
       } catch (err: any) {
         showToast(getErrorMessage(err, 'Gagal menghapus grup'))
         if (err.response?.status === 401) {
@@ -315,7 +327,7 @@ function getUserUnitName(u: UserItem): string {
                   </div>
                 </td>
               </tr>
-              <tr v-else v-for="group in paginatedGroups" :key="group.id || group.name">
+              <tr v-else v-for="group in groupsList" :key="group.id || group.name">
                 <td>
                   <b>{{ group.name }}</b>
                   <div v-if="group.description" class="muted" style="font-size: 11.5px; margin-top: 2px;">
@@ -358,9 +370,9 @@ function getUserUnitName(u: UserItem): string {
           <Paginator
             v-model:first="first"
             :rows="rows"
-            :totalRecords="groupsList.length"
+            :totalRecords="totalRecords"
             :alwaysShow="true"
-            @page="(e) => first = e.first"
+            @page="onPageChange"
             template="FirstPageLink PrevPageLink PageLinks NextPageLink LastPageLink"
           />
         </div>

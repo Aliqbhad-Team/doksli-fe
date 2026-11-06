@@ -8,6 +8,7 @@ import Select from 'primevue/select'
 import Tag from 'primevue/tag'
 import Paginator from 'primevue/paginator'
 import ProgressSpinner from 'primevue/progressspinner'
+import api from '../services/api'
 import { useDocumentsStore, type Doc, type Folder } from '../stores/documents'
 import { useAuthStore } from '../stores/auth'
 import { useCategoryBadge } from '../composables/useCategoryBadge'
@@ -58,36 +59,88 @@ const canModify = (doc: Doc) => {
   return doc.owner_id === authStore.user?.id
 }
 
-// Documents filtered by current folder or all trashed
-const folderDocs = computed(() => {
-  if (!currentFolder.value) {
-    if (activeTab.value === 'trash') {
-      return store.trashedDocs
-    }
-    return []
-  }
-  const list = activeTab.value === 'trash' ? store.trashedDocs : store.activeDocs
-  return list.filter(d => (d.folder_id || d.folderId) === currentFolder.value?.id)
-})
-
-const docFirst = ref(0)
-const folderFirst = ref(0)
 const rows = 10
-const paginatedDocs = computed(() => folderDocs.value.slice(docFirst.value, docFirst.value + rows))
-const paginatedFolders = computed(() => store.folders.slice(folderFirst.value, folderFirst.value + rows))
+
+// Folders pagination state (View 1)
+const foldersList = ref<Folder[]>([])
+const folderFirst = ref(0)
+const folderTotalRecords = ref(0)
+const loadingFolders = ref(false)
+
+async function fetchFoldersPaginated(page = 1) {
+  loadingFolders.value = true
+  try {
+    const res = await api.get('/v1/folders', {
+      params: {
+        paginate: true,
+        page,
+        per_page: rows,
+      },
+    })
+    foldersList.value = (res.data?.data ?? []).map((f: any) => ({
+      ...f,
+      unitId: f.unit_id ?? f.unitId,
+    }))
+    folderTotalRecords.value = res.data?.meta?.total ?? foldersList.value.length
+  } catch {
+    foldersList.value = store.folders.slice(folderFirst.value, folderFirst.value + rows)
+    folderTotalRecords.value = store.folders.length
+  } finally {
+    loadingFolders.value = false
+  }
+}
+
+function onFolderPageChange(e: { page: number; first: number }) {
+  folderFirst.value = e.first
+  const targetPage = e.page + 1
+  fetchFoldersPaginated(targetPage)
+}
+
+// Documents pagination state (View 2)
+const docFirst = ref(0)
+const docTotalRecords = ref(0)
+
+async function fetchFolderDocs(page = 1) {
+  if (!currentFolder.value && activeTab.value === 'aktif') return
+  const params: Record<string, any> = {
+    page,
+    per_page: rows,
+    status: activeTab.value === 'trash' ? 'trashed' : 'active',
+  }
+  if (currentFolder.value?.id) {
+    params.folder_id = currentFolder.value.id
+  }
+  await store.fetchDocuments(params)
+  docTotalRecords.value = store.meta?.total ?? store.documents.length
+}
+
+function onDocPageChange(e: { page: number; first: number }) {
+  docFirst.value = e.first
+  const targetPage = e.page + 1
+  fetchFolderDocs(targetPage)
+}
 
 watch([currentFolder, activeTab], () => {
   docFirst.value = 0
+  if (currentFolder.value || activeTab.value === 'trash') {
+    fetchFolderDocs(1)
+  } else {
+    folderFirst.value = 0
+    fetchFoldersPaginated(1)
+  }
 })
 
-function getFolderDocCount(folderId: string): number {
-  return store.activeDocs.filter(d => (d.folder_id || d.folderId) === folderId).length
+function getFolderDocCount(folder: any): number {
+  if (typeof folder.documents_count === 'number') {
+    return folder.documents_count
+  }
+  return store.activeDocs.filter(d => (d.folder_id || d.folderId) === folder.id).length
 }
 
 // ─── Lifecycle ───
 onMounted(async () => {
   await Promise.allSettled([
-    store.fetchDocuments(),
+    fetchFoldersPaginated(1),
     store.fetchFolders(),
     store.fetchCategories(),
     store.fetchUnits(),
@@ -97,11 +150,13 @@ onMounted(async () => {
 // ─── Folder Actions ───
 function openFolder(folder: Folder) {
   currentFolder.value = folder
+  docFirst.value = 0
   activeTab.value = 'aktif'
 }
 
 function closeFolder() {
   currentFolder.value = null
+  folderFirst.value = 0
 }
 
 function openAddFolderModal() {
@@ -133,6 +188,7 @@ async function submitAddFolder() {
 
     await store.createFolder(payload)
     isAddFolderModalOpen.value = false
+    await fetchFoldersPaginated(Math.floor(folderFirst.value / rows) + 1)
   } catch (e: any) {
     alert(e.response?.data?.message || 'Gagal membuat folder')
   } finally {
@@ -169,7 +225,8 @@ async function submitUploadDoc() {
       note: newDoc.value.note,
     })
     isUploadModalOpen.value = false
-    await store.fetchDocuments()
+    await fetchFolderDocs(Math.floor(docFirst.value / rows) + 1)
+    await fetchFoldersPaginated(Math.floor(folderFirst.value / rows) + 1)
   } catch (e: any) {
     alert(e.response?.data?.message ?? 'Gagal mengunggah dokumen')
   } finally {
@@ -206,6 +263,8 @@ function handleTrash(doc: Doc) {
       try {
         await store.trashDocument(doc.id)
         if (selectedDoc.value?.id === doc.id) closeDrawer()
+        await fetchFolderDocs(Math.floor(docFirst.value / rows) + 1)
+        await fetchFoldersPaginated(Math.floor(folderFirst.value / rows) + 1)
       } catch (e: any) {
         alert(e.response?.data?.message ?? 'Gagal memindahkan ke tempat sampah')
       }
@@ -222,6 +281,8 @@ function handleRestore(doc: Doc) {
       try {
         await store.restoreDocument(doc.id)
         if (selectedDoc.value?.id === doc.id) closeDrawer()
+        await fetchFolderDocs(Math.floor(docFirst.value / rows) + 1)
+        await fetchFoldersPaginated(Math.floor(folderFirst.value / rows) + 1)
       } catch (e: any) {
         alert(e.response?.data?.message ?? 'Gagal memulihkan dokumen')
       }
@@ -239,6 +300,8 @@ function handlePurge(doc: Doc) {
       try {
         await store.deleteDocument(doc.id)
         if (selectedDoc.value?.id === doc.id) closeDrawer()
+        await fetchFolderDocs(Math.floor(docFirst.value / rows) + 1)
+        await fetchFoldersPaginated(Math.floor(folderFirst.value / rows) + 1)
       } catch (e: any) {
         alert(e.response?.data?.message ?? 'Gagal menghapus permanen')
       }
@@ -268,7 +331,7 @@ async function submitUploadVersion() {
     isVersionModalOpen.value = false
     const full = await store.fetchDocument(selectedDoc.value.id)
     if (full) selectedDoc.value = full
-    await store.fetchDocuments()
+    await fetchFolderDocs(Math.floor(docFirst.value / rows) + 1)
   } catch (e: any) {
     alert(e.response?.data?.message ?? 'Gagal upload versi')
   } finally {
@@ -420,14 +483,14 @@ function getUserLevel(doc: Doc) {
     <!-- VIEW 1: DAFTAR FOLDER (Saat currentFolder === null)     -->
     <!-- ═══════════════════════════════════════════════════════ -->
     <div v-if="!currentFolder && activeTab === 'aktif'" class="panel-body p-2">
-      <div v-if="store.loading && store.folders.length === 0" class="empty">
+      <div v-if="loadingFolders" class="empty">
         <div class="flex flex-col items-center justify-center gap-2 py-6">
           <ProgressSpinner style="width: 32px; height: 32px" strokeWidth="4" />
           <span>Memuat folder...</span>
         </div>
       </div>
 
-      <div v-else-if="store.folders.length === 0" class="empty">
+      <div v-else-if="foldersList.length === 0" class="empty">
         <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" class="opacity-40 mb-1">
           <path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2z"/>
         </svg>
@@ -440,7 +503,7 @@ function getUserLevel(doc: Doc) {
       <!-- Clean list of folder rows matching screenshot 1 -->
       <div v-else class="folder-grid">
         <button
-          v-for="folder in paginatedFolders"
+          v-for="folder in foldersList"
           :key="folder.id"
           type="button"
           class="folder-row"
@@ -450,7 +513,7 @@ function getUserLevel(doc: Doc) {
             <path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2z"/>
           </svg>
           <span class="text-sm font-medium">{{ folder.name }} — {{ folder.unit?.name || folder.name }}</span>
-          <span class="count">{{ getFolderDocCount(folder.id) }} dokumen</span>
+          <span class="count">{{ getFolderDocCount(folder) }} dokumen</span>
         </button>
       </div>
 
@@ -459,9 +522,9 @@ function getUserLevel(doc: Doc) {
         <Paginator
           v-model:first="folderFirst"
           :rows="rows"
-          :totalRecords="store.folders.length"
+          :totalRecords="folderTotalRecords"
           :alwaysShow="true"
-          @page="(e) => folderFirst = e.first"
+          @page="onFolderPageChange"
           template="FirstPageLink PrevPageLink PageLinks NextPageLink LastPageLink"
         />
       </div>
@@ -470,57 +533,65 @@ function getUserLevel(doc: Doc) {
     <!-- ═══════════════════════════════════════════════════════ -->
     <!-- VIEW 2: DAFTAR DOKUMEN (Folder dipilih atau Tab Sampah) -->
     <!-- ═══════════════════════════════════════════════════════ -->
-    <div v-else class="table-scroll">
-      <!-- Loading State -->
-      <div v-if="store.loading" class="empty">
-        <div class="flex flex-col items-center justify-center gap-2">
-          <ProgressSpinner style="width: 32px; height: 32px" strokeWidth="4" />
-          <span>Memuat dokumen...</span>
-        </div>
-      </div>
+    <div v-else>
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>NAMA</th>
+              <th>KATEGORI</th>
+              <th>PEMILIK</th>
+              <th>TANGGAL</th>
+              <th>UKURAN</th>
+              <th>VERSI</th>
+              <th>LEVEL ANDA</th>
+              <th style="text-align: right"></th>
+            </tr>
+          </thead>
+          <tbody>
+            <!-- Loading State saat fetch dokumen / pindah page -->
+            <tr v-if="store.loading">
+              <td colspan="8" style="text-align: center; padding: 32px;" class="muted">
+                <div class="flex flex-col items-center justify-center gap-2">
+                  <ProgressSpinner style="width: 32px; height: 32px" strokeWidth="4" />
+                  <span>Memuat dokumen...</span>
+                </div>
+              </td>
+            </tr>
 
-      <!-- Empty State -->
-      <div v-else-if="folderDocs.length === 0" class="empty">
-        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" class="opacity-40 mb-1">
-          <path d="M6 3h8l4 4v14a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/><path d="M14 3v4h4"/>
-        </svg>
-        <div>
-          {{ activeTab === 'aktif'
-            ? (currentFolder ? `Belum ada dokumen di folder "${currentFolder.name}".` : 'Belum ada dokumen aktif.')
-            : (currentFolder ? `Tempat sampah kosong untuk folder "${currentFolder.name}".` : 'Tempat sampah kosong.')
-          }}
-        </div>
-        <button
-          v-if="activeTab === 'aktif'"
-          type="button"
-          class="btn primary sm mt-2"
-          @click="openUploadModal"
-        >
-          + Unggah Dokumen
-        </button>
-      </div>
+            <!-- Empty State -->
+            <tr v-else-if="store.documents.length === 0">
+              <td colspan="8">
+                <div class="empty">
+                  <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" class="opacity-40 mb-1">
+                    <path d="M6 3h8l4 4v14a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/><path d="M14 3v4h4"/>
+                  </svg>
+                  <div>
+                    {{ activeTab === 'aktif'
+                      ? (currentFolder ? `Belum ada dokumen di folder "${currentFolder.name}".` : 'Belum ada dokumen aktif.')
+                      : (currentFolder ? `Tempat sampah kosong untuk folder "${currentFolder.name}".` : 'Tempat sampah kosong.')
+                    }}
+                  </div>
+                  <button
+                    v-if="activeTab === 'aktif'"
+                    type="button"
+                    class="btn primary sm mt-2"
+                    @click="openUploadModal"
+                  >
+                    + Unggah Dokumen
+                  </button>
+                </div>
+              </td>
+            </tr>
 
-      <!-- Clean Table matching Screenshot 2 & 3 -->
-      <table v-else>
-        <thead>
-          <tr>
-            <th>NAMA</th>
-            <th>KATEGORI</th>
-            <th>PEMILIK</th>
-            <th>TANGGAL</th>
-            <th>UKURAN</th>
-            <th>VERSI</th>
-            <th>LEVEL ANDA</th>
-            <th style="text-align: right"></th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr
-            v-for="doc in paginatedDocs"
-            :key="doc.id"
-            class="clickable"
-            @click="openDocDetail(doc)"
-          >
+            <!-- Clean Table matching Screenshot 2 & 3 -->
+            <tr
+              v-else
+              v-for="doc in store.documents"
+              :key="doc.id"
+              class="clickable"
+              @click="openDocDetail(doc)"
+            >
             <!-- NAMA -->
             <td>
               <div class="docname">
@@ -646,15 +717,16 @@ function getUserLevel(doc: Doc) {
           </tr>
         </tbody>
       </table>
+    </div>
 
       <!-- Numeric Pagination (PrimeVue) -->
       <div class="border-t border-[var(--border)] p-2 flex justify-center">
         <Paginator
           v-model:first="docFirst"
           :rows="rows"
-          :totalRecords="folderDocs.length"
+          :totalRecords="docTotalRecords"
           :alwaysShow="true"
-          @page="(e) => docFirst = e.first"
+          @page="onDocPageChange"
           template="FirstPageLink PrevPageLink PageLinks NextPageLink LastPageLink"
         />
       </div>

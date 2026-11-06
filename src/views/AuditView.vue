@@ -1,75 +1,138 @@
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { ref, watch, onMounted } from 'vue'
 import Select from 'primevue/select'
 import Button from 'primevue/button'
 import Paginator from 'primevue/paginator'
 import ProgressSpinner from 'primevue/progressspinner'
-import { useDocumentsStore } from '../stores/documents'
+import { useDocumentsStore, type Audit } from '../stores/documents'
 
 const store = useDocumentsStore()
 
 const selectedUser = ref<string>('')
 const selectedAction = ref<string>('')
 
+const availableUsers = ref<string[]>([])
+const availableActions = ref<string[]>([])
+
+const auditLogsList = ref<Audit[]>([])
+const loading = ref(false)
 const first = ref(0)
 const rows = 10
+const totalRecords = ref(0)
+
+async function loadFilters() {
+  try {
+    const filters = await store.fetchAuditFilters()
+    availableUsers.value = filters.users ?? []
+    availableActions.value = filters.actions ?? []
+  } catch {
+    // fallback
+    const setU = new Set<string>()
+    const setA = new Set<string>()
+    store.auditLog.forEach(l => {
+      if (l.user) setU.add(l.user)
+      if (l.action) setA.add(l.action)
+    })
+    availableUsers.value = Array.from(setU).sort()
+    availableActions.value = Array.from(setA).sort()
+  }
+}
+
+async function fetchAuditLogs(page = 1) {
+  loading.value = true
+  try {
+    const params: Record<string, any> = {
+      page,
+      per_page: rows,
+    }
+    if (selectedUser.value) params.user = selectedUser.value
+    if (selectedAction.value) params.action = selectedAction.value
+
+    const res = await store.fetchAuditLogs(params)
+    auditLogsList.value = res.data ?? []
+    totalRecords.value = res.meta?.total ?? auditLogsList.value.length
+  } catch {
+    // fallback to store mock audit log if API error
+    const filtered = store.auditLog.filter(log => {
+      if (selectedUser.value && log.user !== selectedUser.value) return false
+      if (selectedAction.value && log.action !== selectedAction.value) return false
+      return true
+    })
+    totalRecords.value = filtered.length
+    auditLogsList.value = filtered.slice(first.value, first.value + rows)
+  } finally {
+    loading.value = false
+  }
+}
+
+function onPageChange(event: { page: number; first: number }) {
+  first.value = event.first
+  const targetPage = event.page + 1
+  fetchAuditLogs(targetPage)
+}
 
 watch([selectedUser, selectedAction], () => {
   first.value = 0
+  fetchAuditLogs(1)
 })
 
-// Unique users from audit log
-const availableUsers = computed(() => {
-  const set = new Set<string>()
-  store.auditLog.forEach(l => {
-    if (l.user) set.add(l.user)
-  })
-  return Array.from(set).sort()
-})
-
-// Unique actions from audit log
-const availableActions = computed(() => {
-  const set = new Set<string>()
-  store.auditLog.forEach(l => {
-    if (l.action) set.add(l.action)
-  })
-  return Array.from(set).sort()
-})
-
-// Filtered logs
-const filteredLogs = computed(() => {
-  return store.auditLog.filter(log => {
-    if (selectedUser.value && log.user !== selectedUser.value) return false
-    if (selectedAction.value && log.action !== selectedAction.value) return false
-    return true
-  })
-})
-
-const paginatedLogs = computed(() => {
-  return filteredLogs.value.slice(first.value, first.value + rows)
+onMounted(async () => {
+  await Promise.allSettled([
+    loadFilters(),
+    fetchAuditLogs(1),
+  ])
 })
 
 // Export CSV handler
-function exportCsv() {
-  const rows = [
-    ['Waktu', 'Pengguna', 'Aksi', 'Objek', 'IP'],
-    ...filteredLogs.value.map(l => [
-      `"${l.time}"`,
-      `"${l.user}"`,
-      `"${l.action}"`,
-      `"${l.object.replace(/"/g, '""')}"`,
-      `"${l.ip}"`,
-    ]),
-  ]
+async function exportCsv() {
+  try {
+    const params: Record<string, any> = { all: true }
+    if (selectedUser.value) params.user = selectedUser.value
+    if (selectedAction.value) params.action = selectedAction.value
 
-  const csvContent = rows.map(e => e.join(',')).join('\n')
-  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = `log-audit-${new Date().toISOString().slice(0, 10)}.csv`
-  a.click()
-  URL.revokeObjectURL(url)
+    const res = await store.fetchAuditLogs(params)
+    const exportData: Audit[] = res.data ?? auditLogsList.value
+
+    const rows = [
+      ['Waktu', 'Pengguna', 'Aksi', 'Objek', 'IP'],
+      ...exportData.map(l => [
+        `"${l.time}"`,
+        `"${l.user}"`,
+        `"${l.action}"`,
+        `"${(l.object || '').replace(/"/g, '""')}"`,
+        `"${l.ip}"`,
+      ]),
+    ]
+
+    const csvContent = rows.map(e => e.join(',')).join('\n')
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `log-audit-${new Date().toISOString().slice(0, 10)}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+  } catch {
+    // fallback with current visible list
+    const exportRows = [
+      ['Waktu', 'Pengguna', 'Aksi', 'Objek', 'IP'],
+      ...auditLogsList.value.map(l => [
+        `"${l.time}"`,
+        `"${l.user}"`,
+        `"${l.action}"`,
+        `"${(l.object || '').replace(/"/g, '""')}"`,
+        `"${l.ip}"`,
+      ]),
+    ]
+    const csvContent = exportRows.map(e => e.join(',')).join('\n')
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `log-audit-${new Date().toISOString().slice(0, 10)}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
 }
 </script>
 
@@ -138,7 +201,7 @@ function exportCsv() {
             </tr>
           </thead>
           <tbody>
-            <tr v-if="store.loading">
+            <tr v-if="loading">
               <td colspan="5" style="text-align: center; padding: 32px;" class="muted">
                 <div class="flex flex-col items-center justify-center gap-2">
                   <ProgressSpinner style="width: 32px; height: 32px" strokeWidth="4" />
@@ -147,7 +210,7 @@ function exportCsv() {
               </td>
             </tr>
 
-            <tr v-else-if="filteredLogs.length === 0">
+            <tr v-else-if="auditLogsList.length === 0">
               <td colspan="5">
                 <div class="empty">
                   <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
@@ -158,7 +221,7 @@ function exportCsv() {
               </td>
             </tr>
 
-            <tr v-else v-for="log in paginatedLogs" :key="log.id">
+            <tr v-else v-for="log in auditLogsList" :key="log.id">
               <td class="num">{{ log.time }}</td>
               <td class="audit-user">{{ log.user }}</td>
               <td class="audit-action">{{ log.action }}</td>
@@ -174,9 +237,9 @@ function exportCsv() {
         <Paginator
           v-model:first="first"
           :rows="rows"
-          :totalRecords="filteredLogs.length"
+          :totalRecords="totalRecords"
           :alwaysShow="true"
-          @page="(e) => first = e.first"
+          @page="onPageChange"
           template="FirstPageLink PrevPageLink PageLinks NextPageLink LastPageLink"
         />
       </div>
