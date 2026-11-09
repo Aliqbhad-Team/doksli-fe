@@ -53,10 +53,15 @@ export type Doc = {
 export type Folder = {
   id: string
   name: string
+  parent_folder_id?: string | null
+  parentFolderId?: string | null
   unit_id?: string
   unitId?: string
   unit?: { id: string; name: string }
   restricted?: boolean
+  documents_count?: number
+  trashed_documents_count?: number
+  subfolders_count?: number
 }
 
 export type Category = {
@@ -239,7 +244,7 @@ export const useDocumentsStore = defineStore('documents', () => {
   }
 
   // ── Create Folder ──
-  async function createFolder(payload: { name: string; unit_id?: string; parent_folder_id?: string }) {
+  async function createFolder(payload: { name: string; unit_id?: string }) {
     const { data } = await api.post('/v1/folders', payload)
     await fetchFolders()
     logAudit('Membuat folder baru', payload.name)
@@ -334,11 +339,44 @@ export const useDocumentsStore = defineStore('documents', () => {
     await fetchDocuments()
   }
 
-  function downloadDocument(docId: string) {
+  // ── Move document ──
+  async function moveDocument(docId: string, targetFolderId: string) {
+    const doc = documents.value.find(d => d.id === docId)
+    const targetFolder = folders.value.find(f => f.id === targetFolderId)
+    await updateDocument(docId, { folder_id: targetFolderId })
+    await fetchDocuments()
+    logAudit('Memindahkan dokumen', `${doc?.name || 'Dokumen'} -> ${targetFolder?.name || 'Folder'}`)
+  }
+
+  // ── Download document / version ──
+  async function downloadDocument(docId: string, versionId?: string) {
     const doc = documents.value.find(d => d.id === docId)
     if (doc) {
       logAudit('Unduh dokumen', doc.name)
     }
+    const url = versionId
+      ? `/v1/document-versions/${versionId}/download`
+      : `/v1/documents/${docId}/download`
+    const response = await api.get(url, { responseType: 'blob' })
+    const blob = new Blob([response.data], { type: String(response.headers['content-type'] || 'application/octet-stream') })
+
+    let filename = doc?.name || 'dokumen'
+    const disposition = String(response.headers['content-disposition'] || '')
+    if (disposition && disposition.indexOf('filename=') !== -1) {
+      const match = disposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/)
+      if (match && match[1]) {
+        filename = match[1].replace(/['"]/g, '')
+      }
+    }
+
+    const downloadUrl = window.URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = downloadUrl
+    link.setAttribute('download', filename)
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    window.URL.revokeObjectURL(downloadUrl)
   }
 
   // ── Upload new version ──
@@ -377,7 +415,7 @@ export const useDocumentsStore = defineStore('documents', () => {
     fetchDocuments, fetchDocument,
     fetchFolders, createFolder, fetchCategories, fetchUnits,
     fetchAuditLogs, fetchAuditFilters,
-    uploadDocument, updateDocument, deleteDocument,
+    uploadDocument, updateDocument, deleteDocument, moveDocument,
     trashDocument, restoreDocument, downloadDocument,
     uploadVersion, deleteVersion,
     logAudit, fmtSize, todayStr,
