@@ -35,8 +35,6 @@ const isAddFolderModalOpen = ref(false)
 const folderForm = ref({
   name: '',
   unit_id: '',
-  parent_folder_id: '',
-  parent_folder_name: '',
 })
 const folderSubmitting = ref(false)
 
@@ -65,7 +63,6 @@ function clearUploadFile() {
 const isMoveModalOpen = ref(false)
 const docToMove = ref<Doc | null>(null)
 const moveTargetFolderId = ref<string>('')
-const moveBreadcrumbs = ref<Folder[]>([])
 const moveSubmitting = ref(false)
 
 // ─── Version Upload State ───
@@ -100,12 +97,6 @@ const folderFirst = ref(0)
 const folderTotalRecords = ref(0)
 const loadingFolders = ref(false)
 
-// Subfolders of current active folder
-const currentSubFolders = computed(() => {
-  if (!currentFolder.value) return []
-  return store.folders.filter(f => (f.parent_folder_id || (f as any).parentFolderId) === currentFolder.value?.id)
-})
-
 async function fetchFoldersPaginated(page = 1) {
   loadingFolders.value = true
   try {
@@ -113,11 +104,6 @@ async function fetchFoldersPaginated(page = 1) {
       paginate: true,
       page,
       per_page: rows,
-    }
-    if (currentFolder.value?.id) {
-      params.parent_folder_id = currentFolder.value.id
-    } else {
-      params.root_only = true
     }
 
     const res = await api.get('/v1/folders', { params })
@@ -127,14 +113,8 @@ async function fetchFoldersPaginated(page = 1) {
     }))
     folderTotalRecords.value = res.data?.meta?.total ?? foldersList.value.length
   } catch {
-    const all = store.folders.filter(f => {
-      if (currentFolder.value?.id) {
-        return (f.parent_folder_id || (f as any).parentFolderId) === currentFolder.value.id
-      }
-      return !f.parent_folder_id && !(f as any).parentFolderId
-    })
-    foldersList.value = all.slice(folderFirst.value, folderFirst.value + rows)
-    folderTotalRecords.value = all.length
+    foldersList.value = store.folders.slice(folderFirst.value, folderFirst.value + rows)
+    folderTotalRecords.value = store.folders.length
   } finally {
     loadingFolders.value = false
   }
@@ -227,16 +207,14 @@ function closeFolder() {
   folderFirst.value = 0
 }
 
-function openAddFolderModal(parentFolder: Folder | null = null) {
+function openAddFolderModal() {
   const defaultUnit = authStore.isAdmin
-    ? (parentFolder?.unit_id || store.units[0]?.id || '')
-    : (authStore.user?.unit_id || parentFolder?.unit_id || '')
+    ? (store.units[0]?.id || '')
+    : (authStore.user?.unit_id || '')
 
   folderForm.value = {
     name: '',
     unit_id: defaultUnit,
-    parent_folder_id: parentFolder ? parentFolder.id : '',
-    parent_folder_name: parentFolder ? parentFolder.name : '',
   }
   isAddFolderModalOpen.value = true
 }
@@ -249,14 +227,11 @@ async function submitAddFolder() {
 
   folderSubmitting.value = true
   try {
-    const payload: { name: string; unit_id?: string; parent_folder_id?: string } = {
+    const payload: { name: string; unit_id?: string } = {
       name: folderForm.value.name.trim(),
     }
     if (folderForm.value.unit_id) {
       payload.unit_id = folderForm.value.unit_id
-    }
-    if (folderForm.value.parent_folder_id) {
-      payload.parent_folder_id = folderForm.value.parent_folder_id
     }
 
     await store.createFolder(payload)
@@ -268,37 +243,6 @@ async function submitAddFolder() {
   } finally {
     folderSubmitting.value = false
   }
-}
-
-function handleDeleteFolder(folder: Folder) {
-  const docCount = getFolderDocCount(folder, 'aktif') + getFolderDocCount(folder, 'trash')
-  const subCount = folder.subfolders_count ?? store.folders.filter(f => (f.parent_folder_id || (f as any).parentFolderId) === folder.id).length
-
-  const hasContents = docCount > 0 || subCount > 0
-  const title = hasContents ? 'Hapus Folder dan Seluruh Isinya?' : 'Hapus Folder'
-  const message = hasContents
-    ? `Folder "${folder.name}" berisi ${docCount} dokumen dan ${subCount} sub-folder.`
-    : `Apakah Anda yakin ingin menghapus folder "${folder.name}"?`
-  const submessage = hasContents
-    ? 'Perhatian: Menghapus folder ini akan menghapus folder beserta seluruh dokumen dan sub-folder di dalamnya secara permanen. Tindakan ini tidak dapat dibatalkan.'
-    : 'Folder yang kosong akan langsung dihapus secara permanen.'
-  const confirmLabel = hasContents ? 'Hapus Folder & Isinya' : 'Hapus Folder'
-
-  confirmDelete({
-    title,
-    message,
-    submessage,
-    confirmLabel,
-    onAccept: async () => {
-      try {
-        await store.deleteFolder(folder.id)
-        await fetchFoldersPaginated(1)
-        await store.fetchFolders({ all: true })
-      } catch (e: any) {
-        alert(e.response?.data?.message || 'Gagal menghapus folder')
-      }
-    },
-  })
 }
 
 // ─── Upload Document Actions (Only inside folder, no folder field!) ───
@@ -352,30 +296,12 @@ function handleFileChange(event: Event) {
 function openMoveModal(doc: Doc) {
   docToMove.value = doc
   moveTargetFolderId.value = ''
-  moveBreadcrumbs.value = []
   isMoveModalOpen.value = true
 }
 
 const moveFoldersList = computed(() => {
-  const currentParentId = moveBreadcrumbs.value.length > 0
-    ? moveBreadcrumbs.value[moveBreadcrumbs.value.length - 1].id
-    : null
-  return store.folders.filter(f => {
-    if (!currentParentId) {
-      return !f.parent_folder_id && !(f as any).parentFolderId
-    }
-    return (f.parent_folder_id || (f as any).parentFolderId) === currentParentId
-  })
+  return store.folders
 })
-
-function hasSubfolders(folderId: string): boolean {
-  return store.folders.some(f => (f.parent_folder_id || (f as any).parentFolderId) === folderId)
-}
-
-function enterMoveSubfolder(folder: Folder) {
-  moveBreadcrumbs.value.push(folder)
-  moveTargetFolderId.value = folder.id
-}
 
 async function submitMoveDocument() {
   if (!docToMove.value || !moveTargetFolderId.value) return
@@ -594,22 +520,13 @@ function getUserLevel(doc: Doc) {
           v-if="!currentFolder && canAddFolder"
           type="button"
           class="btn ghost sm"
-          @click="openAddFolderModal(null)"
+          @click="openAddFolderModal"
         >
           + Tambah Folder
         </button>
 
-        <!-- Saat berada di dalam folder: Tambah Sub-Folder & Kembali -->
+        <!-- Saat berada di dalam folder: Kembali & Unggah Dokumen -->
         <template v-if="currentFolder">
-          <button
-            v-if="canAddFolder"
-            type="button"
-            class="btn ghost sm"
-            @click="openAddFolderModal(currentFolder)"
-          >
-            + Tambah Sub-Folder
-          </button>
-
           <button
             type="button"
             class="btn ghost sm"
@@ -674,7 +591,7 @@ function getUserLevel(doc: Doc) {
         <div>
           {{ activeTab === 'aktif' ? 'Belum ada folder yang dibuat.' : 'Tidak ada folder di tempat sampah.' }}
         </div>
-        <button v-if="canAddFolder && activeTab === 'aktif'" class="btn ghost sm mt-2" @click="openAddFolderModal(null)">
+        <button v-if="canAddFolder && activeTab === 'aktif'" class="btn ghost sm mt-2" @click="openAddFolderModal">
           + Tambah Folder
         </button>
       </div>
@@ -700,19 +617,6 @@ function getUserLevel(doc: Doc) {
               {{ getFolderDocCount(folder, activeTab) }}
               {{ activeTab === 'aktif' ? 'dokumen' : 'dokumen terhapus' }}
             </span>
-            <!-- Tombol Hapus Folder (hanya di tab aktif & untuk yang berhak) -->
-            <button
-              v-if="canAddFolder && activeTab === 'aktif'"
-              type="button"
-              class="iconbtn sm opacity-0 group-hover:opacity-100 hover:text-red-400 transition-opacity"
-              title="Hapus folder"
-              @click.stop="handleDeleteFolder(folder)"
-            >
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <polyline points="3 6 5 6 21 6"></polyline>
-                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-              </svg>
-            </button>
           </div>
         </div>
       </div>
@@ -731,48 +635,9 @@ function getUserLevel(doc: Doc) {
     </div>
 
     <!-- ═══════════════════════════════════════════════════════ -->
-    <!-- VIEW 2: DI DALAM FOLDER (SUBFOLDER & TABEL DOKUMEN)    -->
+    <!-- VIEW 2: DI DALAM FOLDER (TABEL DOKUMEN)                -->
     <!-- ═══════════════════════════════════════════════════════ -->
     <div v-else>
-      <!-- Sub-Folders Section (jika folder ini memiliki sub-folder) -->
-      <div v-if="currentSubFolders.length > 0" class="p-3 border-b border-border bg-surface-2/40">
-        <div class="text-[11px] font-bold uppercase tracking-wider text-muted mb-2">
-          Sub-Folder ({{ currentSubFolders.length }})
-        </div>
-        <div class="folder-grid">
-          <div
-            v-for="subf in currentSubFolders"
-            :key="subf.id"
-            class="folder-row flex items-center justify-between p-2 rounded hover:bg-surface-2 transition-colors cursor-pointer group"
-            @click="openFolder(subf)"
-          >
-            <div class="flex items-center gap-2 min-w-0">
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="text-accent flex-shrink-0">
-                <path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2z"/>
-              </svg>
-              <span class="text-xs font-semibold">{{ subf.name }}</span>
-            </div>
-            <div class="flex items-center gap-2">
-              <span class="count text-[11px] text-muted">
-                {{ getFolderDocCount(subf, activeTab) }} {{ activeTab === 'aktif' ? 'dokumen' : 'dokumen terhapus' }}
-              </span>
-              <button
-                v-if="canAddFolder && activeTab === 'aktif'"
-                type="button"
-                class="iconbtn sm opacity-0 group-hover:opacity-100 hover:text-red-400 transition-opacity"
-                title="Hapus sub-folder"
-                @click.stop="handleDeleteFolder(subf)"
-              >
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <polyline points="3 6 5 6 21 6"></polyline>
-                  <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-                </svg>
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-
       <!-- Document Table -->
       <div class="table-scroll">
         <table>
@@ -1156,7 +1021,7 @@ function getUserLevel(doc: Doc) {
       v-model:visible="isMoveModalOpen"
       header="Pindahkan Dokumen"
       modal
-      :style="{ width: '480px' }"
+      :style="{ width: '460px' }"
     >
       <div class="flex flex-col gap-3 py-2">
         <div class="p-2.5 rounded bg-surface-2 border border-border text-xs flex flex-col gap-1">
@@ -1166,37 +1031,14 @@ function getUserLevel(doc: Doc) {
           <span class="text-muted">Folder saat ini: {{ getFolderName(docToMove?.folder_id || docToMove?.folderId) }}</span>
         </div>
 
-        <!-- Mini Breadcrumb Navigator inside Modal -->
-        <div class="crumbs text-xs flex items-center gap-1 p-2 bg-surface rounded border border-border flex-wrap">
-          <button
-            type="button"
-            class="text-xs hover:text-accent font-semibold"
-            :class="{ 'font-bold text-accent': moveBreadcrumbs.length === 0 }"
-            @click="moveBreadcrumbs = []"
-          >
-            📁 Root (Semua Folder)
-          </button>
-          <template v-for="(b, idx) in moveBreadcrumbs" :key="b.id">
-            <span class="text-muted">›</span>
-            <button
-              type="button"
-              class="text-xs hover:text-accent font-semibold"
-              :class="{ 'font-bold text-accent': idx === moveBreadcrumbs.length - 1 }"
-              @click="moveBreadcrumbs = moveBreadcrumbs.slice(0, idx + 1)"
-            >
-              {{ b.name }}
-            </button>
-          </template>
-        </div>
-
         <div class="text-xs text-muted flex items-center justify-between">
-          <span>Pilih folder tujuan di bawah ini:</span>
+          <span>Pilih folder tujuan:</span>
           <span v-if="moveTargetFolderId" class="text-accent font-bold">
             Terpilih: {{ getFolderName(moveTargetFolderId) }}
           </span>
         </div>
 
-        <!-- List of Folders at current level -->
+        <!-- List of Folders -->
         <div class="folder-grid max-h-[240px] overflow-y-auto p-1 border border-border rounded">
           <div
             v-for="f in moveFoldersList"
@@ -1214,15 +1056,6 @@ function getUserLevel(doc: Doc) {
             </div>
 
             <div class="flex items-center gap-2">
-              <button
-                v-if="hasSubfolders(f.id)"
-                type="button"
-                class="text-[11px] px-2 py-0.5 rounded border border-border hover:bg-surface text-muted hover:text-text"
-                title="Buka sub-folder"
-                @click.stop="enterMoveSubfolder(f)"
-              >
-                Subfolder ›
-              </button>
               <span
                 class="text-[11px] px-2 py-0.5 rounded font-bold"
                 :class="moveTargetFolderId === f.id ? 'bg-accent text-accent-contrast' : 'bg-surface-2 text-muted'"
@@ -1233,7 +1066,7 @@ function getUserLevel(doc: Doc) {
           </div>
 
           <div v-if="moveFoldersList.length === 0" class="empty py-6 text-xs text-muted text-center">
-            Tidak ada sub-folder di level ini.
+            Belum ada folder tujuan.
           </div>
         </div>
       </div>
@@ -1254,30 +1087,26 @@ function getUserLevel(doc: Doc) {
     </Dialog>
 
     <!-- ═══════════════════════════════════════════════════════ -->
-    <!-- MODAL: TAMBAH FOLDER / SUB-FOLDER BARU                  -->
+    <!-- MODAL: TAMBAH FOLDER BARU                               -->
     <!-- ═══════════════════════════════════════════════════════ -->
     <Dialog
       v-model:visible="isAddFolderModalOpen"
-      :header="folderForm.parent_folder_id ? 'Buat Sub-Folder Baru' : 'Buat Folder Baru'"
+      header="Buat Folder Baru"
       modal
       :style="{ width: '420px' }"
     >
       <div class="flex flex-col gap-3 py-2">
-        <div v-if="folderForm.parent_folder_id" class="p-2 rounded bg-surface-2 border border-border text-xs text-muted">
-          Folder Induk: <strong class="text-text">{{ folderForm.parent_folder_name }}</strong>
-        </div>
-
         <label class="formlabel">
           <span>Nama Folder <span class="text-red-500">*</span></span>
           <InputText
             v-model="folderForm.name"
-            :placeholder="folderForm.parent_folder_id ? 'Contoh: Berkas Kontrak 2026' : 'Contoh: Dokumen Legal 2026'"
+            placeholder="Contoh: Dokumen Legal 2026"
             class="w-full"
             autofocus
           />
         </label>
 
-        <label v-if="authStore.isAdmin && !folderForm.parent_folder_id" class="formlabel">
+        <label v-if="authStore.isAdmin" class="formlabel">
           <span>Unit Organisasi <span class="text-red-500">*</span></span>
           <Select
             v-model="folderForm.unit_id"

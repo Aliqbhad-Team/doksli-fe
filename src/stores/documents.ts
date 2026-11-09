@@ -244,21 +244,11 @@ export const useDocumentsStore = defineStore('documents', () => {
   }
 
   // ── Create Folder ──
-  async function createFolder(payload: { name: string; unit_id?: string; parent_folder_id?: string }) {
+  async function createFolder(payload: { name: string; unit_id?: string }) {
     const { data } = await api.post('/v1/folders', payload)
     await fetchFolders()
     logAudit('Membuat folder baru', payload.name)
     return data.data
-  }
-
-  // ── Delete Folder ──
-  async function deleteFolder(id: string) {
-    const folder = folders.value.find(f => f.id === id)
-    await api.delete(`/v1/folders/${id}`)
-    await fetchFolders()
-    if (folder) {
-      logAudit('Menghapus folder', folder.name)
-    }
   }
 
   // ── Fetch categories ──
@@ -423,7 +413,7 @@ export const useDocumentsStore = defineStore('documents', () => {
     auditLog, recentActivities, totalKB, todayCount,
     activeDocs, trashedDocs,
     fetchDocuments, fetchDocument,
-    fetchFolders, createFolder, deleteFolder, fetchCategories, fetchUnits,
+    fetchFolders, createFolder, fetchCategories, fetchUnits,
     fetchAuditLogs, fetchAuditFilters,
     uploadDocument, updateDocument, deleteDocument, moveDocument,
     trashDocument, restoreDocument, downloadDocument,
