@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import Dialog from 'primevue/dialog'
 import Button from 'primevue/button'
 import InputText from 'primevue/inputtext'
@@ -131,6 +131,7 @@ const docFirst = ref(0)
 const docTotalRecords = ref(0)
 
 async function fetchFolderDocs(page = 1) {
+  store.documents.length = 0;
   const params: Record<string, any> = {
     page,
     per_page: rows,
